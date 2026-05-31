@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ACL - Agent Control Layer</title>
+    <script type="text/javascript">
+        var mxBasePath = '/mxgraph';
+        var mxLoadResources = true;
+        var mxResourceExtension = '.txt';
+    </script>
+    <script defer src="/mxgraph/js/Init.js"></script>
+    <script defer src="/mxgraph/deflate/base64.js"></script>
+    <script defer src="/mxgraph/deflate/pako.min.js"></script>
+    <script defer src="/mxgraph/jscolor/jscolor.js"></script>
+    <script defer src="/mxgraph/sanitizer/sanitizer.min.js"></script>
+    <script defer src="/mxgraph/js/mxClient.js"></script>
+    <!-- <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"> -->
+  </head>
+  <body class="bg-surface-50 text-surface-800">
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

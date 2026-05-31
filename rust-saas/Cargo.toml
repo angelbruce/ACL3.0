@@ -1,0 +1,42 @@
+[workspace]
+members = [
+    "crates/shared",
+    "crates/flow-svc",
+    "crates/llm-svc",
+    "crates/mcp-svc",
+    "crates/auth-svc",
+    "crates/admin-svc",
+    "crates/auth-svc",
+    "crates/agent-svc",
+    "crates/session-svc",
+    "crates/workspace-svc",
+
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+
+[workspace.dependencies]
+axum = { version = "0.7", features = ["multipart"] }
+axum-extra = { version = "0.4", features = ["headers"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+diesel = { version = "2", features = ["postgres", "r2d2"] }
+dotenv = "0.15"
+config = "0.13"
+jwt-simple = "0.12"
+bcrypt = "0.15"
+redis = "0.23"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+thiserror = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1"
+futures = "0.3"
+bytes = "1"
+http = "1"
+hyper = "1"
+base64 = "0.22"

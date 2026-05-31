@@ -1,0 +1,22 @@
+[package]
+name = "shared"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+thiserror = "1"
+diesel = { version = "2", features = ["postgres", "r2d2", "chrono", "serde_json"] }
+pq-sys = { version = "0.6", features = ["bundled"] }
+openssl-sys = { version = "0.9.100", features = ["vendored"] }
+jsonwebtoken = "9"
+axum = "0.7"
+http = "1"
+async-trait = "0.1"
+
+[lib]
+name = "shared"
+path = "src/lib.rs"

@@ -1,0 +1,42 @@
+# Rust 基础构建镜像 - 包含工具链和依赖缓存
+FROM rust:1.88-slim as rust-base
+
+WORKDIR /app
+
+# 配置使用 Rust 官方 sparse index（加速依赖下载）
+RUN echo '[source.crates-io]' > /usr/local/cargo/config.toml && \
+    echo 'registry = "sparse+https://index.crates.io/"' >> /usr/local/cargo/config.toml
+
+# 使用阿里云镜像源
+RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources && \
+    apt-get update && apt-get install -y pkg-config libssl-dev ca-certificates perl libfindbin-libs-perl make gcc && rm -rf /var/lib/apt/lists/*
+
+# 复制 Cargo.toml 并构建依赖缓存层
+COPY Cargo.toml .
+COPY crates/shared/Cargo.toml crates/shared/
+COPY crates/mcp-svc/Cargo.toml crates/mcp-svc/
+COPY crates/llm-svc/Cargo.toml crates/llm-svc/
+COPY crates/agent-svc/Cargo.toml crates/agent-svc/
+COPY crates/session-svc/Cargo.toml crates/session-svc/
+COPY crates/flow-svc/Cargo.toml crates/flow-svc/
+COPY crates/auth-svc/Cargo.toml crates/auth-svc/
+COPY crates/admin-svc/Cargo.toml crates/admin-svc/
+COPY crates/workspace-svc/Cargo.toml crates/workspace-svc/
+
+# 创建一个空的 main.rs 来触发依赖下载和编译
+RUN mkdir -p crates/shared/src crates/mcp-svc/src crates/llm-svc/src crates/agent-svc/src crates/session-svc/src crates/flow-svc/src crates/auth-svc/src crates/admin-svc/src crates/workspace-svc/src && \
+    echo "fn main() {}" > crates/shared/src/lib.rs && \
+    echo "fn main() {}" > crates/mcp-svc/src/main.rs && \
+    echo "fn main() {}" > crates/llm-svc/src/main.rs && \
+    echo "fn main() {}" > crates/agent-svc/src/main.rs && \
+    echo "fn main() {}" > crates/session-svc/src/main.rs && \
+    echo "fn main() {}" > crates/flow-svc/src/main.rs && \
+    echo "fn main() {}" > crates/auth-svc/src/main.rs && \
+    echo "fn main() {}" > crates/admin-svc/src/main.rs && \
+    echo "fn main() {}" > crates/workspace-svc/src/main.rs
+
+# 构建依赖（这会缓存所有 crates.io 依赖）
+RUN cargo build --release --all
+
+# 清理临时文件，但保留依赖缓存
+RUN rm -rf crates/*/src

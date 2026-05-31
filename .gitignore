@@ -1,0 +1,5 @@
+rust-saas/frontend/acl-web/node_modules/
+rust-saas/frontend/acl-web/dist/
+rust-saas/.idea/
+rust-saas/.trae/
+rust-saas/target/

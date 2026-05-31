@@ -1,0 +1,189 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: acl-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: acl_db
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d acl_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: acl-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  agent-svc:
+    build:
+      context: .
+      dockerfile: ./crates/agent-svc/Dockerfile
+    container_name: acl-agent-svc
+    ports:
+      - "8081:8080"
+    environment:
+      - PORT=8080
+      - DATABASE_URL=postgres://admin:password@postgres:5432/acl_db
+      - REDIS_URL=redis://redis:6379/0
+      - JWT_SECRET=your-256-bit-secret-key-here-change-in-production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  flow-svc:
+    build:
+      context: .
+      dockerfile: ./crates/flow-svc/Dockerfile
+    container_name: acl-flow-svc
+    ports:
+      - "8082:8080"
+    environment:
+      - PORT=8080
+      - DATABASE_URL=postgres://admin:password@postgres:5432/acl_db
+      - REDIS_URL=redis://redis:6379/0
+      - JWT_SECRET=your-256-bit-secret-key-here-change-in-production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  session-svc:
+    build:
+      context: .
+      dockerfile: ./crates/session-svc/Dockerfile
+    container_name: acl-session-svc
+    ports:
+      - "8083:8080"
+    environment:
+      - PORT=8080
+      - DATABASE_URL=postgres://admin:password@postgres:5432/acl_db
+      - REDIS_URL=redis://redis:6379/0
+      - JWT_SECRET=your-256-bit-secret-key-here-change-in-production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  llm-svc:
+    build:
+      context: .
+      dockerfile: ./crates/llm-svc/Dockerfile
+    container_name: acl-llm-svc
+    ports:
+      - "8084:8080"
+    environment:
+      - PORT=8080
+      - DATABASE_URL=postgres://admin:password@postgres:5432/acl_db
+      - REDIS_URL=redis://redis:6379/0
+      - MCP_BASE_URL=http://mcp-svc:8080
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  mcp-svc:
+    build:
+      context: .
+      dockerfile: ./crates/mcp-svc/Dockerfile
+    container_name: acl-mcp-svc
+    ports:
+      - "8085:8080"
+    environment:
+      - PORT=8080
+      - DATABASE_URL=postgres://admin:password@postgres:5432/acl_db
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  auth-svc:
+    build:
+      context: .
+      dockerfile: ./crates/auth-svc/Dockerfile
+    container_name: acl-auth-svc
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - DATABASE_URL=postgres://admin:password@postgres:5432/acl_db
+      - REDIS_URL=redis://redis:6379/0
+      - JWT_SECRET=your-256-bit-secret-key-here-change-in-production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  admin-svc:
+    build:
+      context: .
+      dockerfile: ./crates/admin-svc/Dockerfile
+    container_name: acl-admin-svc
+    ports:
+      - "8086:8080"
+    environment:
+      - PORT=8080
+      - DATABASE_URL=postgres://admin:password@postgres:5432/acl_db
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  workspace-svc:
+    build:
+      context: .
+      dockerfile: ./crates/workspace-svc/Dockerfile
+    container_name: acl-workspace-svc
+    ports:
+      - "8087:8087"
+    environment:
+      - PORT=8087
+      - DATABASE_URL=postgres://admin:password@postgres:5432/acl_db
+      - REDIS_URL=redis://redis:6379/0
+      - JWT_SECRET=your-256-bit-secret-key-here-change-in-production
+      - WORKSPACE_ROOT=/workspace_storage
+    volumes:
+      - workspace_storage:/workspace_storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:
+  workspace_storage:
+
+# 构建配置
+x-build-args:
+  rust-base:
+    context: .
+    dockerfile: Dockerfile.base
+    image: rust-base:latest
