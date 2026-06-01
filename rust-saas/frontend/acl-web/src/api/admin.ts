@@ -2,7 +2,7 @@ import axios, { AxiosInstance } from 'axios'
 import { api } from './client'
 
 const ADMIN_API_BASE = import.meta.env.VITE_API_ADMIN_URL || 
-  (window.location.host === 'localhost:8086' ? 'http://localhost:8086' : `http://${window.location.host}/foreign/admin`)
+  (window.location.host === 'localhost:3000' ? 'http://localhost:8086' : `http://${window.location.host}/foreign/admin`)
 
 const adminApi: AxiosInstance = axios.create({
   baseURL: ADMIN_API_BASE,
