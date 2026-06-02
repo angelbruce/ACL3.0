@@ -1,50 +1,50 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
-import { Plus, X, Folder, FolderOpen, FileText, Download, Trash2 } from 'lucide-vue-next'
-import { workspaceService, type FileInfo, type ProjectInfo, type CreateProjectRequest } from '@/api/workspace'
+import { useRouter } from 'vue-router'
+import { Plus, X, Trash2, FileText, Loader2, Edit2, Code } from 'lucide-vue-next'
+import { useWorkspaceStore, type Project, type ProjectPurpose, type CreateProjectRequest } from '@/stores/workspace'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 
-const projects = ref<ProjectInfo[]>([])
-const currentProject = ref<ProjectInfo | null>(null)
-const files = ref<FileInfo[]>([])
+const router = useRouter()
+const workspaceStore = useWorkspaceStore()
+
+const projects = computed(() => workspaceStore.projects)
+const currentProject = ref<Project | null>(null)
 const loading = ref(true)
 const error = ref('')
 const showCreateModal = ref(false)
 const newProjectName = ref('')
+const newProjectPurpose = ref<ProjectPurpose>('article')
+const newProjectDescription = ref('')
 const showDeleteConfirm = ref(false)
-const deleteTarget = ref<{ type: 'project' | 'file'; name: string; path?: string } | null>(null)
+const deleteTarget = ref<{ type: 'project'; id: number; name: string } | null>(null)
+const deletingId = ref<number | null>(null)
 
-const activeTab = computed(() => currentProject.value?.name || 'root')
-
-const fetchProjects = async () => {
-  try {
-    projects.value = await workspaceService.listProjects()
-    if (projects.value.length > 0) {
-      currentProject.value = projects.value[0]
-      await fetchProjectFiles()
-    } else {
-      files.value = []
-    }
-  } catch (e) {
-    console.error('Failed to load projects:', e)
-    projects.value = []
-    files.value = []
-  }
+const getPurposeIcon = (purpose: ProjectPurpose) => {
+  return purpose === 'article' ? FileText : Code
 }
 
-const fetchProjectFiles = async () => {
+const getPurposeColor = (purpose: ProjectPurpose) => {
+  return purpose === 'article' 
+    ? 'from-blue-100 to-blue-200 text-blue-500' 
+    : 'from-green-100 to-green-200 text-green-500'
+}
+
+const getPurposeLabel = (purpose: ProjectPurpose) => {
+  return purpose === 'article' ? '文章创作' : '代码开发'
+}
+
+const fetchProjects = async () => {
   loading.value = true
   error.value = ''
   try {
-    if (currentProject.value) {
-      files.value = await workspaceService.listProjectFiles(currentProject.value.name)
-    } else {
-      files.value = []
+    await workspaceStore.fetchProjects()
+    if (projects.value.length > 0) {
+      currentProject.value = projects.value[0]
     }
   } catch (e) {
-    error.value = 'Failed to load files'
-    console.error(e)
-    files.value = []
+    console.error('Failed to load projects:', e)
+    error.value = '加载项目失败'
   } finally {
     loading.value = false
   }
@@ -54,532 +54,214 @@ const handleCreateProject = async () => {
   if (!newProjectName.value.trim()) return
   
   try {
-    const request: CreateProjectRequest = { name: newProjectName.value }
-    const project = await workspaceService.createProject(request)
-    projects.value.unshift(project)
+    const request: CreateProjectRequest = {
+      name: newProjectName.value,
+      purpose: newProjectPurpose.value,
+      description: newProjectDescription.value || undefined,
+    }
+    const project = await workspaceStore.createProject(request)
     currentProject.value = project
     showCreateModal.value = false
     newProjectName.value = ''
-    await fetchProjectFiles()
+    newProjectDescription.value = ''
+    error.value = ''
   } catch (e: any) {
-    alert(e?.response?.data?.message || 'Failed to create project')
+    error.value = e?.response?.data?.message || '创建项目失败'
     console.error(e)
   }
 }
 
-const handleDeleteProject = (projectName: string) => {
-  deleteTarget.value = { type: 'project', name: projectName }
-  showDeleteConfirm.value = true
+const openCreateModal = () => {
+  showCreateModal.value = true
+  newProjectName.value = ''
+  newProjectPurpose.value = 'article'
+  newProjectDescription.value = ''
+  error.value = ''
 }
 
-const confirmDelete = async () => {
-  if (!deleteTarget.value) return
-  
-  if (deleteTarget.value.type === 'project') {
+const handleDeleteProject = async (project: Project, event: Event) => {
+  event.stopPropagation()
+  if (confirm(`确定要删除项目 "${project.name}" 吗？`)) {
+    deletingId.value = project.id
     try {
-      await workspaceService.deleteProject(deleteTarget.value.name)
-      projects.value = projects.value.filter(p => p.name !== deleteTarget.value!.name)
-      
-      if (currentProject.value?.name === deleteTarget.value.name) {
+      await workspaceStore.deleteProject(project.id)
+      if (currentProject.value?.id === project.id) {
         currentProject.value = projects.value.length > 0 ? projects.value[0] : null
-        await fetchProjectFiles()
       }
     } catch (e) {
       console.error('Failed to delete project:', e)
-    }
-  } else if (deleteTarget.value.type === 'file' && deleteTarget.value.path) {
-    try {
-      await workspaceService.deleteFile(deleteTarget.value.path)
-      files.value = files.value.filter(f => f.path !== deleteTarget.value!.path)
-    } catch (e) {
-      console.error('Failed to delete file:', e)
+    } finally {
+      deletingId.value = null
     }
   }
-  
-  showDeleteConfirm.value = false
-  deleteTarget.value = null
 }
 
-const cancelDelete = () => {
-  showDeleteConfirm.value = false
-  deleteTarget.value = null
+const goToProject = (project: Project) => {
+  router.push(`/projects/${project.id}`)
 }
 
-const handleSelectProject = async (project: ProjectInfo) => {
+const handleSelectProject = (project: Project) => {
   currentProject.value = project
-  await fetchProjectFiles()
 }
 
-const handleDownload = async (file: FileInfo) => {
-  try {
-    const response = await workspaceService.downloadFile(file.path)
-    const blob = response.data
-    const url = window.URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = file.name
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    window.URL.revokeObjectURL(url)
-  } catch (e) {
-    console.error('Failed to download file:', e)
-  }
-}
-
-const handleDeleteFile = (file: FileInfo) => {
-  deleteTarget.value = { type: 'file', name: file.name, path: file.path }
-  showDeleteConfirm.value = true
-}
-
-const formatSize = (bytes: number): string => {
-  if (bytes === 0) return '0 B'
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
-}
-
-const formatDate = (dateStr: string): string => {
-  return new Date(dateStr).toLocaleString()
+const formatDate = (dateStr: string) => {
+  return new Date(dateStr).toLocaleDateString('zh-CN', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  })
 }
 
 onMounted(fetchProjects)
 </script>
 
 <template>
-  <div class="w-full md:px-1 h-full" >
-    <div class="header">
-      <div class="header-left">
-        <h2>工作区</h2>
-        <p class="text-gray-500">管理您的项目和文件</p>
+  <div class="p-6">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">工作区</h1>
+        <p class="page-subtitle">workspace management</p>
       </div>
-      <button class="btn btn-primary" @click="showCreateModal = true">
-        <Plus class="w-4 h-4 mr-1" />
+      <button @click="openCreateModal" class="btn btn-primary">
+        <Plus class="w-4 h-4" />
         新建项目
       </button>
     </div>
 
-    <div v-if="projects.length === 0" class="empty-projects">
-      <div class="empty-icon">📂</div>
-      <p>暂无项目，创建您的第一个项目开始使用</p>
+    <div v-if="loading" class="flex items-center justify-center py-12">
+      <Loader2 class="w-8 h-8 animate-spin text-primary-500" />
     </div>
 
-    <div v-else class="workspace-content w-full">
-      <div class="tabs ">
-        <button
-          v-for="project in projects"
-          :key="project.name"
-          :class="[
-            'tab-btn',
-            currentProject?.name === project.name ? 'active' : ''
-          ]"
-          @click="handleSelectProject(project)"
-        >
-          <FolderOpen class="w-4 h-4 mr-2" />
-          {{ project.name }}
-          <button 
-            class="tab-delete"
-            @click.stop="handleDeleteProject(project.name)"
-          >
-            <X class="w-3 h-3" />
-          </button>
+    <div v-else-if="projects.length === 0" class="card p-12 text-center">
+      <div class="w-16 h-16 mx-auto rounded-2xl bg-blue-50 border border-blue-100 flex items-center justify-center mb-4">
+        <FileText class="w-8 h-8 text-blue-400" />
+      </div>
+      <h3 class="text-lg font-medium text-surface-800 mb-2">暂无项目</h3>
+      <p class="text-surface-400 mb-6">创建一个项目来开始您的创作</p>
+      <button @click="openCreateModal" class="btn btn-primary">
+        <Plus class="w-4 h-4" /> 创建项目
+      </button>
+    </div>
+
+    <div v-else class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+      <div
+        v-for="project in projects"
+        :key="project.id"
+        @click="goToProject(project)"
+        class="card p-5 cursor-pointer group"
+      >
+        <div class="flex items-start justify-between mb-3">
+          <div class="flex items-center gap-3">
+            <div :class="['w-12 h-12 rounded-xl bg-gradient-to-br', getPurposeColor(project.purpose), 'flex items-center justify-center']">
+              <component :is="getPurposeIcon(project.purpose)" class="w-6 h-6" />
+            </div>
+            <div>
+              <p class="text-xs text-surface-400 mb-0.5">用途</p>
+              <span :class="['px-2 py-0.5 rounded-full text-xs font-medium', project.purpose === 'article' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700']">
+                {{ getPurposeLabel(project.purpose) }}
+              </span>
+              <p class="text-xs text-surface-400 mt-1">{{ formatDate(project.created_at) }}</p>
+            </div>
+          </div>
+          <div class="flex items-center gap-1">
+            <button @click.stop="handleDeleteProject(project, $event)" :disabled="deletingId === project.id" class="p-2 text-surface-400 hover:text-red-500 hover:bg-surface-100 rounded-lg transition-colors">
+              <Loader2 v-if="deletingId === project.id" class="w-4 h-4 animate-spin" />
+              <Trash2 v-else class="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        <div class="min-h-[80px]">
+          <p class="text-xs text-surface-400 mb-1">名称</p>
+          <h3 class="font-semibold text-base text-surface-800 truncate" :title="project.name">{{ project.name }}</h3>
+        </div>
+
+        <div class="mt-3 pt-3 border-t border-surface-100">
+          <p class="text-xs text-surface-400 mb-1">描述</p>
+          <p v-if="project.description" class="text-sm text-surface-600 line-clamp-2">{{ project.description }}</p>
+          <p v-else class="text-sm text-surface-300 italic">暂无描述</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div v-if="showCreateModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+    <div class="bg-white rounded-xl p-6 w-full max-w-md mx-4">
+      <div class="flex items-center justify-between mb-6">
+        <h2 class="text-xl font-semibold text-surface-800">创建新项目</h2>
+        <button @click="showCreateModal = false" class="p-2 text-surface-400 hover:text-surface-600 hover:bg-surface-100 rounded-lg transition-colors">
+          <X class="w-5 h-5" />
         </button>
       </div>
 
-      <div class="files-container">
-        <div v-if="loading" class="loading">
-          <div class="loader"></div>
+      <div class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-surface-700 mb-2">项目名称 *</label>
+          <input 
+            v-model="newProjectName"
+            type="text"
+            placeholder="输入项目名称"
+            class="w-full px-4 py-2 border border-surface-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+            @keydown.enter="handleCreateProject"
+          />
         </div>
 
-        <div v-else-if="error" class="error">
-          {{ error }}
-        </div>
-
-        <div v-else-if="files.length === 0" class="empty-files">
-          <div class="empty-icon">📁</div>
-          <p>此项目中暂无文件</p>
-        </div>
-
-        <div v-else class="files-list">
-          <div
-            v-for="file in files"
-            :key="file.file_path"
-            class="file-item"
-          >
-            <div class="file-icon">
-              <Folder v-if="file.is_directory" class="w-6 h-6 text-yellow-500" />
-              <FileText v-else class="w-6 h-6 text-blue-500" />
-            </div>
-            <div class="file-info">
-              <span class="file-name">{{ file.file_name }}</span>
-              <span class="file-meta">{{ formatSize(file.file_size) }} - {{ formatDate(file.updated_at) }}</span>
-            </div>
-            <div class="file-actions">
-              <button 
-                class="action-btn download-btn"
-                title="下载"
-                @click="handleDownload(file)"
-              >
-                <Download class="w-4 h-4" />
-              </button>
-              <button 
-                class="action-btn delete-btn"
-                title="删除"
-                @click="handleDeleteFile(file)"
-              >
-                <Trash2 class="w-4 h-4" />
-              </button>
-            </div>
+        <div>
+          <label class="block text-sm font-medium text-surface-700 mb-2">项目用途 *</label>
+          <div class="flex gap-3">
+            <button 
+              @click="newProjectPurpose = 'article'"
+              :class="['flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg border transition-colors', newProjectPurpose === 'article' ? 'bg-blue-500 text-white border-blue-500' : 'border-surface-200 text-surface-600 hover:bg-surface-50']"
+            >
+              <FileText class="w-4 h-4" />
+              文章创作
+            </button>
+            <button 
+              @click="newProjectPurpose = 'coding'"
+              :class="['flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg border transition-colors', newProjectPurpose === 'coding' ? 'bg-green-500 text-white border-green-500' : 'border-surface-200 text-surface-600 hover:bg-surface-50']"
+            >
+              <Code class="w-4 h-4" />
+              代码开发
+            </button>
           </div>
         </div>
+
+        <div>
+          <label class="block text-sm font-medium text-surface-700 mb-2">项目描述</label>
+          <textarea 
+            v-model="newProjectDescription"
+            placeholder="输入项目描述（可选）"
+            rows="3"
+            class="w-full px-4 py-2 border border-surface-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none"
+          ></textarea>
+        </div>
+
+        <p v-if="error" class="text-red-500 text-sm">{{ error }}</p>
       </div>
-    </div>
 
-    <ConfirmDialog
-      :visible="showDeleteConfirm"
-      :title="deleteTarget?.type === 'project' ? '删除项目' : '删除文件'"
-      :message="deleteTarget ? `确定要删除 ${deleteTarget.name} 吗？此操作无法撤销。` : ''"
-      @confirm="confirmDelete"
-      @cancel="cancelDelete"
-    />
-
-    <div v-if="showCreateModal" class="modal-overlay" @click.self="showCreateModal = false">
-      <div class="modal">
-        <div class="modal-header">
-          <h3>创建新项目</h3>
-          <button class="modal-close" @click="showCreateModal = false">×</button>
-        </div>
-        <div class="modal-body">
-          <div class="form-group">
-            <label>项目名称</label>
-            <input
-              v-model="newProjectName"
-              type="text"
-              placeholder="请输入项目名称"
-              class="form-control"
-              @keyup.enter="handleCreateProject"
-            />
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button class="btn btn-secondary" @click="showCreateModal = false">取消</button>
-          <button class="btn btn-primary" @click="handleCreateProject">创建</button>
-        </div>
+      <div class="flex gap-3 mt-6">
+        <button 
+          @click="showCreateModal = false"
+          class="flex-1 px-4 py-2 border border-surface-200 text-surface-600 rounded-lg hover:bg-surface-50 transition-colors"
+        >
+          取消
+        </button>
+        <button 
+          @click="handleCreateProject"
+          class="flex-1 px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors"
+        >
+          创建
+        </button>
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.workspace-container {
-  margin: 0 auto;
-  padding: 20px;
-}
-
-.header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-}
-
-.header-left h2 {
-  font-size: 24px;
-  font-weight: 600;
-  margin-bottom: 4px;
-}
-
-.btn {
-  display: flex;
-  align-items: center;
-  padding: 8px 16px;
-  border-radius: 6px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  border: none;
-  transition: background-color 0.2s;
-}
-
-.btn-primary {
-  background-color: #3b82f6;
-  color: white;
-}
-
-.btn-primary:hover {
-  background-color: #2563eb;
-}
-
-.btn-secondary {
-  background-color: #f3f4f6;
-  color: #374151;
-}
-
-.btn-secondary:hover {
-  background-color: #e5e7eb;
-}
-
-.empty-projects {
-  text-align: center;
-  padding: 80px 20px;
-  color: #9ca3af;
-}
-
-.empty-icon {
-  font-size: 48px;
-  margin-bottom: 12px;
-}
-
-.workspace-content {
-  background: white;
-  border-radius: 8px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-}
-
-.tabs {
-  display: flex;
-  gap: 4px;
-  padding: 8px 8px 0;
-  background-color: #f9fafb;
-  border-bottom: 1px solid #e5e7eb;
-  overflow-x: auto;
-}
-
-.tab-btn {
-  display: flex;
-  align-items: center;
-  padding: 10px 16px;
-  border: none;
-  background: transparent;
-  border-radius: 6px 6px 0 0;
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 500;
-  color: #6b7280;
-  transition: all 0.2s;
-  white-space: nowrap;
-}
-
-.tab-btn:hover {
-  background-color: #f3f4f6;
-}
-
-.tab-btn.active {
-  background-color: white;
-  color: #3b82f6;
-  box-shadow: 0 -1px 0 0 #3b82f6;
-}
-
-.tab-delete {
-  margin-left: 8px;
-  padding: 2px;
-  border: none;
-  background: transparent;
-  color: #9ca3af;
-  cursor: pointer;
-  border-radius: 3px;
-  transition: all 0.2s;
-}
-
-.tab-delete:hover {
-  background-color: #fee2e2;
-  color: #dc2626;
-}
-
-.files-container {
-  padding: 16px;
-}
-
-.loading {
-  display: flex;
-  justify-content: center;
-  padding: 40px;
-}
-
-.loader {
-  width: 40px;
-  height: 40px;
-  border: 4px solid #f3f3f3;
-  border-top: 4px solid #3b82f6;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
-
-.error {
-  color: #ef4444;
-  padding: 20px;
-  text-align: center;
-}
-
-.empty-files {
-  padding: 60px 20px;
-  text-align: center;
-  color: #9ca3af;
-}
-
-.files-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.file-item {
-  display: flex;
-  align-items: center;
-  padding: 12px;
-  border-radius: 6px;
-  transition: background-color 0.2s;
-}
-
-.file-item:hover {
-  background-color: #f9fafb;
-}
-
-.file-icon {
-  margin-right: 12px;
-}
-
-.file-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.file-name {
-  display: block;
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.file-meta {
-  display: block;
-  font-size: 12px;
-  color: #6b7280;
-  margin-top: 2px;
-}
-
-.file-actions {
-  display: flex;
-  gap: 8px;
-  margin-left: 12px;
-  opacity: 0;
-  transition: opacity 0.2s;
-}
-
-.file-item:hover .file-actions {
-  opacity: 1;
-}
-
-.action-btn {
-  padding: 6px;
-  border: none;
-  background: transparent;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: background-color 0.2s;
-}
-
-.download-btn {
-  color: #3b82f6;
-}
-
-.download-btn:hover {
-  background-color: #eff6ff;
-}
-
-.delete-btn {
-  color: #ef4444;
-}
-
-.delete-btn:hover {
-  background-color: #fee2e2;
-}
-
-.modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-
-.modal {
-  background: white;
-  border-radius: 8px;
-  width: 90%;
-  max-width: 480px;
-  max-height: 90vh;
-  overflow-y: auto;
-}
-
-.modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 20px;
-  border-bottom: 1px solid #e5e7eb;
-}
-
-.modal-header h3 {
-  margin: 0;
-}
-
-.modal-close {
-  background: none;
-  border: none;
-  font-size: 24px;
-  cursor: pointer;
-  color: #9ca3af;
-}
-
-.modal-body {
-  padding: 20px;
-}
-
-.modal-footer {
-  display: flex;
-  gap: 12px;
-  justify-content: flex-end;
-  padding: 16px 20px;
-  border-top: 1px solid #e5e7eb;
-}
-
-.form-group {
-  margin-bottom: 16px;
-}
-
-.form-group label {
-  display: block;
-  font-size: 14px;
-  font-weight: 500;
-  margin-bottom: 4px;
-}
-
-.form-control {
-  width: 100%;
-  padding: 8px 12px;
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
-  font-size: 14px;
-  box-sizing: border-box;
-}
-
-.form-control:focus {
-  outline: none;
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
 }
 </style>

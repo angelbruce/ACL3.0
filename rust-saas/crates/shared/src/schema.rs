@@ -260,6 +260,54 @@ table! {
     }
 }
 
+table! {
+    projects (id) {
+        id -> Int8,
+        user_id -> Int8,
+        name -> Text,
+        purpose -> Text,
+        description -> Nullable<Text>,
+        model_id -> Nullable<Int8>,
+        agent_id -> Nullable<Int8>,
+        last_accessed_at -> Timestamp,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
+table! {
+    project_files (id) {
+        id -> Int8,
+        project_id -> Int8,
+        name -> Text,
+        content -> Nullable<Text>,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
+table! {
+    project_messages (id) {
+        id -> Int8,
+        project_id -> Int8,
+        role -> Text,
+        content -> Text,
+        created_at -> Timestamp,
+    }
+}
+
+table! {
+    project_summaries (id) {
+        id -> Int8,
+        user_id -> Int8,
+        project_id -> Int8,
+        file_name -> Text,
+        summary -> Text,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
 joinable!(agent_skills -> agents (agent_id));
 joinable!(agent_tools -> agents (agent_id));
 joinable!(content_store_configs -> agents (agent_id));
@@ -273,6 +321,9 @@ joinable!(role_permissions -> roles (role_id));
 joinable!(personnel_roles -> personnel (personnel_id));
 joinable!(personnel_roles -> roles (role_id));
 joinable!(permissions -> menus (menu_id));
+joinable!(project_files -> projects (project_id));
+joinable!(project_messages -> projects (project_id));
+joinable!(project_summaries -> projects (project_id));
 
 allow_tables_to_appear_in_same_query!(
     agents,
@@ -299,4 +350,8 @@ allow_tables_to_appear_in_same_query!(
     kanban_boards,
     kanban_items,
     kanban_subscriptions,
+    projects,
+    project_files,
+    project_messages,
+    project_summaries,
 );

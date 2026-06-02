@@ -3,7 +3,14 @@ use chrono::{Utc, DateTime};
 use mime_guess::from_path;
 use serde::{Serialize, Deserialize};
 use shared::errors::{ServiceError, ServiceResult};
-use shared::models::{WorkspaceFile, KanbanBoard, KanbanBoardWithItems, KanbanItem, KanbanSubscription, SubscribedBoard, CreateKanbanBoardRequest, UpdateKanbanBoardRequest, ShareFileRequest};
+use shared::models::{
+    WorkspaceFile, KanbanBoard, KanbanBoardWithItems, KanbanItem, KanbanSubscription, SubscribedBoard, 
+    CreateKanbanBoardRequest, UpdateKanbanBoardRequest, ShareFileRequest,
+    Project, ProjectFile, ProjectMessage, ProjectSummary, ProjectWithNames,
+    CreateProjectRequest as SharedCreateProjectRequest, UpdateProjectRequest as SharedUpdateProjectRequest,
+    CreateProjectFileRequest, UpdateProjectFileRequest, AddProjectMessageRequest,
+    CreateOrUpdateProjectSummaryRequest
+};
 use shared::utils::Claims;
 use std::collections::HashMap;
 use std::env;
@@ -31,7 +38,131 @@ fn sanitize_path(path: &str) -> ServiceResult<String> {
 
 pub async fn list_projects(
     Extension(claims): Extension<Claims>,
-) -> ServiceResult<Json<Vec<ProjectInfo>>> {
+) -> ServiceResult<Json<Vec<ProjectWithNames>>> {
+    let repo = WorkspaceRepository::new();
+    let projects = repo.get_projects_by_user(claims.user_id).await?;
+    Ok(Json(projects))
+}
+
+pub async fn get_project(
+    Extension(claims): Extension<Claims>,
+    Path(project_id): Path<i64>,
+) -> ServiceResult<Json<ProjectWithNames>> {
+    let repo = WorkspaceRepository::new();
+    let project = repo.get_project_by_id(project_id).await?;
+    match project {
+        Some(p) if p.user_id == claims.user_id => Ok(Json(p)),
+        _ => Err(ServiceError::NotFound),
+    }
+}
+
+pub async fn create_project(
+    Extension(claims): Extension<Claims>,
+    Json(req): Json<SharedCreateProjectRequest>,
+) -> ServiceResult<Json<Project>> {
+    let repo = WorkspaceRepository::new();
+    let project = repo.create_project(claims.user_id, req).await?;
+    Ok(Json(project))
+}
+
+pub async fn update_project(
+    Extension(claims): Extension<Claims>,
+    Path(project_id): Path<i64>,
+    Json(req): Json<SharedUpdateProjectRequest>,
+) -> ServiceResult<Json<Project>> {
+    let repo = WorkspaceRepository::new();
+    let project = repo.update_project(project_id, claims.user_id, req).await?;
+    Ok(Json(project))
+}
+
+pub async fn delete_project(
+    Extension(claims): Extension<Claims>,
+    Path(project_id): Path<i64>,
+) -> ServiceResult<Json<HashMap<String, String>>> {
+    let repo = WorkspaceRepository::new();
+    repo.delete_project(project_id, claims.user_id).await?;
+    Ok(Json(HashMap::from([("message".to_string(), "Project deleted successfully".to_string())])))
+}
+
+pub async fn list_project_files(
+    Extension(claims): Extension<Claims>,
+    Path(project_id): Path<i64>,
+) -> ServiceResult<Json<Vec<ProjectFile>>> {
+    let repo = WorkspaceRepository::new();
+    let files = repo.get_project_files(project_id, claims.user_id).await?;
+    Ok(Json(files))
+}
+
+pub async fn create_project_file(
+    Extension(claims): Extension<Claims>,
+    Path(project_id): Path<i64>,
+    Json(req): Json<CreateProjectFileRequest>,
+) -> ServiceResult<Json<ProjectFile>> {
+    let repo = WorkspaceRepository::new();
+    let file = repo.create_project_file(project_id, claims.user_id, req).await?;
+    Ok(Json(file))
+}
+
+pub async fn update_project_file(
+    Extension(claims): Extension<Claims>,
+    Path(file_id): Path<i64>,
+    Json(req): Json<UpdateProjectFileRequest>,
+) -> ServiceResult<Json<ProjectFile>> {
+    let repo = WorkspaceRepository::new();
+    let file = repo.update_project_file(file_id, claims.user_id, req).await?;
+    Ok(Json(file))
+}
+
+pub async fn delete_project_file(
+    Extension(claims): Extension<Claims>,
+    Path(file_id): Path<i64>,
+) -> ServiceResult<Json<HashMap<String, String>>> {
+    let repo = WorkspaceRepository::new();
+    repo.delete_project_file(file_id, claims.user_id).await?;
+    Ok(Json(HashMap::from([("message".to_string(), "File deleted successfully".to_string())])))
+}
+
+pub async fn get_project_messages(
+    Extension(claims): Extension<Claims>,
+    Path(project_id): Path<i64>,
+) -> ServiceResult<Json<Vec<ProjectMessage>>> {
+    let repo = WorkspaceRepository::new();
+    let messages = repo.get_project_messages(project_id, claims.user_id).await?;
+    Ok(Json(messages))
+}
+
+pub async fn add_project_message(
+    Extension(claims): Extension<Claims>,
+    Path(project_id): Path<i64>,
+    Json(req): Json<AddProjectMessageRequest>,
+) -> ServiceResult<Json<ProjectMessage>> {
+    let repo = WorkspaceRepository::new();
+    let message = repo.add_project_message(project_id, claims.user_id, req).await?;
+    Ok(Json(message))
+}
+
+pub async fn get_project_summaries(
+    Extension(claims): Extension<Claims>,
+    Path(project_id): Path<i64>,
+) -> ServiceResult<Json<Vec<ProjectSummary>>> {
+    let repo = WorkspaceRepository::new();
+    let summaries = repo.get_project_summaries(project_id, claims.user_id).await?;
+    Ok(Json(summaries))
+}
+
+pub async fn create_or_update_project_summary(
+    Extension(claims): Extension<Claims>,
+    Path(project_id): Path<i64>,
+    Json(req): Json<CreateOrUpdateProjectSummaryRequest>,
+) -> ServiceResult<Json<ProjectSummary>> {
+    let repo = WorkspaceRepository::new();
+    let summary = repo.create_or_update_project_summary(project_id, claims.user_id, req).await?;
+    Ok(Json(summary))
+}
+
+pub async fn list_workspace_files(
+    Extension(claims): Extension<Claims>,
+) -> ServiceResult<Json<Vec<WorkspaceFile>>> {
     let user_id = claims.user_id;
     let workspace_path = get_user_workspace_path(user_id);
     
@@ -40,88 +171,49 @@ pub async fn list_projects(
         return Ok(Json(Vec::new()));
     }
     
-    let mut projects: Vec<ProjectInfo> = Vec::new();
+    let mut files: Vec<WorkspaceFile> = Vec::new();
     
-    for entry in fs::read_dir(&workspace_path).map_err(|_| ServiceError::InternalError)? {
+    collect_files_recursive(&workspace_path, &workspace_path, user_id, &mut files)?;
+    
+    files.sort_by(|a, b| {
+        if a.is_directory != b.is_directory {
+            a.is_directory.cmp(&b.is_directory).reverse()
+        } else {
+            a.file_name.to_lowercase().cmp(&b.file_name.to_lowercase())
+        }
+    });
+    
+    Ok(Json(files))
+}
+
+fn collect_files_recursive(base_path: &PathBuf, current_path: &PathBuf, user_id: i64, files: &mut Vec<WorkspaceFile>) -> ServiceResult<()> {
+    for entry in fs::read_dir(current_path).map_err(|_| ServiceError::InternalError)? {
         let entry = entry.map_err(|_| ServiceError::InternalError)?;
         let path = entry.path();
+        let metadata = entry.metadata().map_err(|_| ServiceError::InternalError)?;
         
-        if path.is_dir() {
-            let project_name = path.file_name().unwrap().to_string_lossy().to_string();
-            
-            projects.push(ProjectInfo {
-                name: project_name.clone(),
-                path: project_name,
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
-            });
+        let file_name = path.file_name().unwrap().to_string_lossy().to_string();
+        let relative_path = path.strip_prefix(base_path).unwrap_or(&path).to_string_lossy().to_string();
+        
+        files.push(WorkspaceFile {
+            id: 0,
+            user_id,
+            file_path: relative_path,
+            file_name: file_name.clone(),
+            file_size: metadata.len() as i64,
+            is_directory: metadata.is_dir(),
+            created_at: chrono::Utc::now().naive_utc(),
+            updated_at: chrono::Utc::now().naive_utc(),
+        });
+        
+        if metadata.is_dir() {
+            collect_files_recursive(base_path, &path, user_id, files)?;
         }
     }
-    
-    projects.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
-    
-    Ok(Json(projects))
+    Ok(())
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ProjectInfo {
-    pub name: String,
-    pub path: String,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct CreateProjectRequest {
-    pub name: String,
-}
-
-pub async fn create_project(
-    Extension(claims): Extension<Claims>,
-    Json(req): Json<CreateProjectRequest>,
-) -> ServiceResult<Json<ProjectInfo>> {
-    let user_id = claims.user_id;
-    let project_name = sanitize_path(&req.name)?;
-    
-    if project_name.is_empty() {
-        return Err(ServiceError::InvalidInput("Project name cannot be empty".to_string()));
-    }
-    
-    let project_path = get_user_workspace_path(user_id).join(&project_name);
-    
-    if project_path.exists() {
-        return Err(ServiceError::Conflict("Project already exists".to_string()));
-    }
-    
-    fs::create_dir_all(&project_path).map_err(|e| ServiceError::InvalidInput(e.to_string()))?;
-    
-    Ok(Json(ProjectInfo {
-        name: project_name.clone(),
-        path: project_name,
-        created_at: Utc::now(),
-        updated_at: Utc::now(),
-    }))
-}
-
-pub async fn delete_project(
-    Extension(claims): Extension<Claims>,
-    Path(project_name): Path<String>,
-) -> ServiceResult<Json<HashMap<String, String>>> {
-    let user_id = claims.user_id;
-    let sanitized_name = sanitize_path(&project_name)?;
-    
-    let project_path = get_user_workspace_path(user_id).join(&sanitized_name);
-    
-    if !project_path.exists() {
-        return Err(ServiceError::NotFound);
-    }
-    
-    fs::remove_dir_all(&project_path).map_err(|_| ServiceError::InternalError)?;
-    
-    Ok(Json(HashMap::from([("message".to_string(), "Project deleted successfully".to_string())])))
-}
-
-pub async fn list_project_files(
+pub async fn list_project_workspace_files(
     Extension(claims): Extension<Claims>,
     Path(project_name): Path<String>,
 ) -> ServiceResult<Json<Vec<WorkspaceFile>>> {

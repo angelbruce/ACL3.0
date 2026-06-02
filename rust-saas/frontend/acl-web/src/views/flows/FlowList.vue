@@ -67,22 +67,23 @@ const formatDate = (dateStr: string) => new Date(dateStr).toLocaleDateString('zh
               </div>
             </div>
           </div>
+          <div class="flex items-center gap-1">
+            <button @click.stop="router.push(`/flows/${flow.id}/edit`)" class="p-2 text-surface-400 hover:text-primary-500 hover:bg-surface-100 rounded-lg transition-colors" title="编辑">
+              <Workflow class="w-4 h-4" />
+            </button>
+            <button @click.stop="startFlow(flow.id, $event)" class="p-2 text-surface-400 hover:text-green-500 hover:bg-green-50 rounded-lg transition-colors" title="运行">
+              <Play class="w-4 h-4" />
+            </button>
+            <button @click.stop="deleteFlow(flow.id, $event)" :disabled="deletingId === flow.id" class="p-2 text-surface-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors" :title="deletingId === flow.id ? '删除中...' : '删除'">
+              <Loader2 v-if="deletingId === flow.id" class="w-4 h-4 animate-spin" />
+              <Trash2 v-else class="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         <div class="flex items-center gap-2 mb-4">
           <span class="tag tag-blue">{{ flow.config.vertices?.length || 0 }} 节点</span>
           <span class="tag tag-cyan">{{ flow.config.edges?.length || 0 }} 连接</span>
-        </div>
-
-        <div class="flex items-center gap-2">
-          <button @click.stop="router.push(`/flows/${flow.id}/edit`)" class="btn btn-outline flex-1 justify-center text-sm">编辑</button>
-          <button @click.stop="startFlow(flow.id, $event)" class="btn btn-outline text-sm justify-center text-green-600 border-green-200 hover:bg-green-50">
-            <Play class="w-3.5 h-3.5" />
-          </button>
-          <button @click.stop="deleteFlow(flow.id, $event)" :disabled="deletingId === flow.id" class="btn btn-danger text-sm justify-center">
-            <Loader2 v-if="deletingId === flow.id" class="w-3.5 h-3.5 animate-spin" />
-            <Trash2 v-else class="w-3.5 h-3.5" />
-          </button>
         </div>
       </div>
     </div>

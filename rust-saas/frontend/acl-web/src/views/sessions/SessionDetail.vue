@@ -95,25 +95,42 @@ const getMessageIcon = (type: SessionType) => {
 const parseMarkdown = (text: string) => {
   let result = text
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\[DONE\]/g, '<span class="done-badge">&nbsp;</span>')
   
   const lines = result.split('\n')
   const processedLines: string[] = []
   let inList = false
   
   for (const line of lines) {
-    const listMatch = line.match(/^\*\s+(.+)$/)
-    if (listMatch) {
-      if (!inList) {
-        processedLines.push('<div class="list-container">')
-        inList = true
-      }
-      processedLines.push(`<div class="list-item" style="display:block;">➢ ${listMatch[1].trim()}</div>`)
-    } else {
+    const headingMatch = line.match(/^(#{1,6})\s+(.+)$/)
+    if (headingMatch) {
       if (inList) {
         processedLines.push('</div>')
         inList = false
       }
-      processedLines.push(line.replace(/\*(.+?)\*/g, '<em>$1</em>'))
+      const level = headingMatch[1].length
+      processedLines.push(`<h${level} class="heading-${level}">${headingMatch[2].trim()}</h${level}>`)
+    } else if (/^---+$/.test(line)) {
+      if (inList) {
+        processedLines.push('</div>')
+        inList = false
+      }
+      processedLines.push('<hr class="divider" />')
+    } else {
+      const listMatch = line.match(/^\*\s+(.+)$/)
+      if (listMatch) {
+        if (!inList) {
+          processedLines.push('<div class="list-container">')
+          inList = true
+        }
+        processedLines.push(`<div class="list-item" style="display:block;">➢ ${listMatch[1].trim()}</div>`)
+      } else {
+        if (inList) {
+          processedLines.push('</div>')
+          inList = false
+        }
+        processedLines.push(line.replace(/\*(.+?)\*/g, '<em>$1</em>'))
+      }
     }
   }
   
@@ -350,3 +367,66 @@ const formatTime = (dateStr: string) => new Date(dateStr).toLocaleTimeString('zh
     </div>
   </div>
 </template>
+
+<style scoped>
+:deep(.heading-1) {
+  font-size: 1.5rem;
+  font-weight: bold;
+  margin: 1rem 0 0.5rem;
+  color: #1e293b;
+}
+
+:deep(.heading-2) {
+  font-size: 1.25rem;
+  font-weight: bold;
+  margin: 0.75rem 0 0.5rem;
+  color: #334155;
+}
+
+:deep(.heading-3) {
+  font-size: 1.125rem;
+  font-weight: 600;
+  margin: 0.5rem 0 0.25rem;
+  color: #475569;
+}
+
+:deep(.heading-4) {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0.5rem 0 0.25rem;
+  color: #64748b;
+}
+
+:deep(.heading-5) {
+  font-size: 0.875rem;
+  font-weight: 600;
+  margin: 0.25rem 0;
+  color: #64748b;
+}
+
+:deep(.heading-6) {
+  font-size: 0.875rem;
+  font-weight: 500;
+  margin: 0.25rem 0;
+  color: #94a3b8;
+}
+
+:deep(.divider) {
+  border: none;
+  height: 1px;
+  background: linear-gradient(to right, transparent, #cbd5e1, transparent);
+  margin: 1rem 0;
+}
+
+:deep(.done-badge) {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: white;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: 9999px;
+  margin: 0 0.25rem;
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+}
+</style>

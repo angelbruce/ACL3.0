@@ -86,6 +86,14 @@ pub struct RolePermission {
 //     pub permission_id: i64,
 // }
 
+#[derive(Debug, Serialize, Deserialize, Clone, Insertable)]
+#[diesel(table_name = crate::schema::roles)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewRole {
+    pub name: String,
+    pub description: Option<String>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LoginRequest {
     pub password: String,
@@ -177,16 +185,16 @@ pub struct LlmModel {
     pub is_default: bool,
 }
 
-// #[derive(Debug, Serialize, Deserialize, Clone, Insertable)]
-// #[diesel(table_name = crate::schema::llm_models)]
-// #[diesel(check_for_backend(diesel::pg::Pg))]
-// pub struct NewLlmModel {
-//     pub name: String,
-//     pub provider_id: i64,
-//     pub model_id: String,
-//     pub description: Option<String>,
-//     pub enabled: bool,
-// }
+
+#[derive(Debug, Serialize, Deserialize, Clone, Insertable)]
+#[diesel(table_name = crate::schema::llm_models)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewLlmModel {
+    pub name: String,
+    pub access_url: String,
+    pub api_key: String,
+    pub is_default: bool,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UpdateLlmModelRequest {
@@ -207,14 +215,27 @@ pub struct Session {
     pub created_at: NaiveDateTime,
 }
 
-// #[derive(Debug, Serialize, Deserialize, Clone, Insertable)]
-// #[diesel(table_name = crate::schema::sessions)]
-// #[diesel(check_for_backend(diesel::pg::Pg))]
-// pub struct NewSession {
-//     pub id: String,
-//     pub user_id: i64,
-//     pub context: String,
-// }
+
+#[derive(Debug, Serialize, Deserialize, Clone, Insertable)]
+#[diesel(table_name = crate::schema::sessions)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewSession {
+    pub user_id: i64,
+    pub description: Option<String>,
+    pub agent_id: Option<i64>,
+    pub model_id: Option<i64>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Insertable)]
+#[diesel(table_name = crate::schema::session_items)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewSessionItem {
+    pub session_id: i64,
+    pub description: String,
+    pub session_type: String,
+}
+
+
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SessionRequest {
@@ -311,8 +332,141 @@ pub struct KanbanBoardWithItems {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SubscribedBoard {
     pub board: KanbanBoard,
-    pub items: Vec<SharedFileInfo>,
+    pub items: KanbanSubscription,
 }
+
+
+#[derive(Debug, Serialize, Deserialize, Clone, Queryable, Selectable)]
+#[diesel(table_name = crate::schema::projects)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct Project {
+    pub id: i64,
+    pub user_id: i64,
+    pub name: String,
+    pub purpose: String,
+    pub description: Option<String>,
+    pub model_id: Option<i64>,
+    pub agent_id: Option<i64>,
+    pub last_accessed_at: NaiveDateTime,
+    pub created_at: NaiveDateTime,
+    pub updated_at: NaiveDateTime,
+}
+
+
+#[derive(Debug, Serialize, Deserialize, Clone, Queryable, Selectable)]
+#[diesel(table_name = crate::schema::project_files)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct ProjectFile {
+    pub id: i64,
+    pub project_id: i64,
+    pub name: String,
+    pub content: Option<String>,
+    pub created_at: NaiveDateTime,
+    pub updated_at: NaiveDateTime,
+}
+
+
+#[derive(Debug, Serialize, Deserialize, Clone, Queryable, Selectable)]
+#[diesel(table_name = crate::schema::project_messages)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct ProjectMessage {
+    pub id: i64,
+    pub project_id: i64,
+    pub role: String,
+    pub content: String,
+    pub created_at: NaiveDateTime,
+}
+
+
+#[derive(Debug, Serialize, Deserialize, Clone, Queryable, Selectable)]
+#[diesel(table_name = crate::schema::project_summaries)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct ProjectSummary {
+    pub id: i64,
+    pub user_id: i64,
+    pub project_id: i64,
+    pub file_name: String,
+    pub summary: String,
+    pub created_at: NaiveDateTime,
+    pub updated_at: NaiveDateTime,
+}
+
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CreateProjectRequest {
+    pub name: String,
+    pub purpose: String,
+    pub description: Option<String>,
+    pub model_id: Option<i64>,
+    pub agent_id: Option<i64>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct UpdateProjectRequest {
+    pub name: String,
+    pub description: Option<String>,
+    pub model_id: Option<i64>,
+    pub agent_id: Option<i64>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CreateProjectFileRequest {
+    pub name: String,
+    pub content: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct UpdateProjectFileRequest {
+    pub content: String,
+}
+
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AddProjectMessageRequest {
+    pub content: String,
+    pub role: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CreateOrUpdateProjectSummaryRequest {
+    pub file_name: String,
+    pub summary: String,
+}
+
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ProjectWithNames {
+    pub id: i64,
+    pub user_id: i64,
+    pub name: String,
+    pub purpose: String,
+    pub description: Option<String>,
+    pub model_id: Option<i64>,
+    pub agent_id: Option<i64>,
+    pub model_name: Option<String>,
+    pub agent_name: Option<String>,
+    pub last_accessed_at: NaiveDateTime,
+    pub created_at: NaiveDateTime,
+    pub updated_at: NaiveDateTime,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SharedCreateProjectRequest {
+    pub name: String,
+    pub purpose: String,
+    pub description: Option<String>,
+    pub model_id: Option<i64>,
+    pub agent_id: Option<i64>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SharedUpdateProjectRequest {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub model_id: Option<i64>,
+    pub agent_id: Option<i64>,
+}
+
 
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -404,7 +558,6 @@ pub struct AuthResponse {
 #[diesel(table_name = crate::schema::personnel)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Personnel {
-
     pub id :i64,
     pub user_id : Option<i64>,
     pub name :String,
@@ -415,6 +568,47 @@ pub struct Personnel {
     pub last_login_date :Option<NaiveDateTime>,
     pub created_at : NaiveDateTime,
     pub updated_at : NaiveDateTime
+}
+
+
+#[derive(Debug, Serialize, Deserialize, Clone, QueryableByName)]
+#[diesel(table_name = crate::schema::personnel)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct PersonnelResult {
+    pub id: i64,
+    pub user_id: Option<i64>,
+    pub name: String,
+    pub gender: Option<String>,
+    pub email: Option<String>,
+    pub wechat: Option<String>,
+    pub phone: Option<String>,
+    pub last_login_date: Option<NaiveDateTime>,
+    pub created_at: NaiveDateTime,
+    pub updated_at: NaiveDateTime,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Insertable)]
+#[diesel(table_name = crate::schema::personnel)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewPersonnel {
+    pub user_id: Option<i64>,
+    pub name: String,
+    pub gender: Option<String>,
+    pub email: Option<String>,
+    pub wechat: Option<String>,
+    pub phone: Option<String>,
+    pub last_login_date: Option<NaiveDateTime>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, AsChangeset)]
+#[diesel(table_name = crate::schema::personnel)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct PersonnelUpdate {
+    pub name: Option<String>,
+    pub gender: Option<String>,
+    pub email: Option<String>,
+    pub wechat: Option<String>,
+    pub phone: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -469,6 +663,14 @@ pub struct Flow {
 }
 
 
+#[derive(Debug, Serialize, Deserialize, Clone, Insertable)]
+#[diesel(table_name = crate::schema::flows)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewFlow {
+    pub name: String,
+    pub config: serde_json::Value,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, Queryable, Selectable)]
 #[diesel(table_name = crate::schema::flow_runtimes)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -479,6 +681,13 @@ pub struct FlowRuntime {
     pub created_at : NaiveDateTime,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, Insertable)]
+#[diesel(table_name = crate::schema::flow_runtimes)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewFlowRuntime {
+    pub flow_id: i64,
+    pub is_over: bool,
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone, Queryable, Selectable)]
 #[diesel(table_name = crate::schema::flow_runtime_nodes)]
@@ -493,6 +702,20 @@ pub struct FlowRuntimeNode {
     pub status :String,
     pub next_choice :Option<String>,
     pub created_at : NaiveDateTime,
+}
+
+
+#[derive(Debug, Serialize, Deserialize, Clone, Insertable)]
+#[diesel(table_name = crate::schema::flow_runtime_nodes)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewFlowRuntimeNode {
+    pub flow_runtime_id: i64,
+    pub flow_id: i64,
+    pub action_id: i64,
+    pub action: String,
+    pub prompt: Option<String>,
+    pub status: String,
+    pub next_choice: Option<String>,
 }
 
 
@@ -627,6 +850,30 @@ pub struct McpServer {
 }
 
 
+#[derive(Debug, Serialize, Deserialize, Clone, Insertable)]
+#[diesel(table_name = crate::schema::mcp_servers)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewMcpServer {
+    pub name: String,
+    pub description: Option<String>,
+    pub server_type: String,
+    pub url: String,
+    pub headers: Option<serde_json::Value>,
+    pub enabled: bool,
+    pub stateless: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, AsChangeset)]
+#[diesel(table_name = crate::schema::mcp_servers)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct McpServerUpdate {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub url: Option<String>,
+    pub headers: Option<serde_json::Value>,
+    pub enabled: Option<bool>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CreateMcpServerRequest {
     pub name : String,
@@ -651,6 +898,7 @@ pub struct LlmRequest {
     pub model_id: i64,
     pub agent_id: Option<i64>,
     pub messages: Vec<ChatMessage>,
+    pub project_id: Option<i64>,
     pub stream: Option<bool>,
 }
 
@@ -702,6 +950,36 @@ pub struct AgentTool {
     pub server_id: Option<i64>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, Insertable)]
+#[diesel(table_name = crate::schema::agent_tools)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewAgentTool {
+    pub agent_id: i64,
+    pub name: String,
+    pub description: String,
+    pub input_schema: String,
+    pub output_schema: String,
+    pub server_id: Option<i64>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Insertable)]
+#[diesel(table_name = crate::schema::agents)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewAgent {
+    pub name: String,
+    pub defination: Option<String>,
+}
+
+
+#[derive(Debug, Serialize, Deserialize, Clone, Insertable)]
+#[diesel(table_name = crate::schema::agent_skills)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewAgentSkill {
+    pub agent_id: i64,
+    pub skill_prompt: String,
+}
+
+
 #[derive(Debug, Serialize, Deserialize, Clone, Queryable, Selectable)]
 #[diesel(table_name = crate::schema::agent_skills)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -716,6 +994,16 @@ pub struct AgentSkill {
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ContentStoreConfig {
     pub id: i64,
+    pub agent_id: i64,
+    pub store_type: String,
+    pub config: String,
+}
+
+
+#[derive(Debug, Serialize, Deserialize, Clone, Insertable)]
+#[diesel(table_name = crate::schema::content_store_configs)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewContentStoreConfig {
     pub agent_id: i64,
     pub store_type: String,
     pub config: String,
@@ -829,6 +1117,17 @@ pub struct Menu {
     pub sort_order: i32,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Insertable)]
+#[diesel(table_name = crate::schema::menus)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewMenu {
+    pub name: String,
+    pub path: Option<String>,
+    pub parent_id: Option<i64>,
+    pub icon: Option<String>,
+    pub sort_order: i32,
 }
 
 

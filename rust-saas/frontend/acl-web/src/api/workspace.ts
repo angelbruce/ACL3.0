@@ -49,6 +49,21 @@ export interface SubscribedBoard {
   items: SharedFileInfo[]
 }
 
+export interface ProjectSummary {
+  id: number
+  user_id: number
+  project_id: number
+  file_name: string
+  summary: string
+  created_at: string
+  updated_at: string
+}
+
+export interface CreateOrUpdateProjectSummaryRequest {
+  file_name: string
+  summary: string
+}
+
 export interface SharedFileInfo {
   id: number
   file_name: string
@@ -74,6 +89,8 @@ export interface ShareFileRequest {
   file_path: string
 }
 
+import type { Project, ProjectFile, ProjectChatMessage, CreateProjectRequest, UpdateProjectRequest } from '@/types'
+
 export interface ProjectInfo {
   name: string
   path: string
@@ -81,20 +98,70 @@ export interface ProjectInfo {
   updated_at: string
 }
 
-export interface CreateProjectRequest {
-  name: string
-}
-
 export const workspaceService = {
-  listProjects: () => api.get<ProjectInfo[]>(workspaceApi, '/api/workspace/projects'),
+  listProjects: () => api.get<Project[]>(workspaceApi, '/api/projects'),
+
+  getProject: (id: number) => api.get<Project>(workspaceApi, `/api/projects/${id}`),
 
   createProject: (data: CreateProjectRequest) =>
-    api.post<ProjectInfo>(workspaceApi, '/api/workspace/projects', data),
+    api.post<Project>(workspaceApi, '/api/projects', data),
 
-  deleteProject: (name: string) => api.delete<{ message: string }>(workspaceApi, `/api/workspace/projects/${encodeURIComponent(name)}`),
+  updateProject: (id: number, data: UpdateProjectRequest) =>
+    api.put<Project>(workspaceApi, `/api/projects/${id}`, data),
 
-  listProjectFiles: (projectName: string) => 
-    api.get<FileInfo[]>(workspaceApi, `/api/workspace/projects/${encodeURIComponent(projectName)}/files`),
+  deleteProject: (id: number) => api.delete<{ message: string }>(workspaceApi, `/api/projects/${id}`),
+
+  listProjectFiles: (projectId: number) => 
+    api.get<ProjectFile[]>(workspaceApi, `/api/projects/${projectId}/files`),
+
+  createProjectFile: (projectId: number, name: string, content?: string) =>
+    api.post<ProjectFile>(workspaceApi, `/api/projects/${projectId}/files`, { name, content }),
+
+  updateProjectFile: (fileId: number, content: string) =>
+    api.put<ProjectFile>(workspaceApi, `/api/project-files/${fileId}`, { content }),
+
+  deleteProjectFile: (fileId: number) => api.delete<{ message: string }>(workspaceApi, `/api/project-files/${fileId}`),
+
+  getProjectMessages: (projectId: number) => api.get<ProjectChatMessage[]>(workspaceApi, `/api/projects/${projectId}/messages`),
+
+  addProjectMessage: (projectId: number, content: string, role: 'user' | 'assistant' | 'system') =>
+    api.post<ProjectChatMessage>(workspaceApi, `/api/projects/${projectId}/messages`, { content, role }),
+
+  chatWithProject: (projectId: number, modelId: number, agentId: number | undefined, message: string, onMessage: (content: string) => void, onError: (error: Error) => void) => {
+    const url = `/api/projects/${projectId}/chat`
+    const body = JSON.stringify({ project_id: projectId, model_id: modelId, agent_id: agentId, message })
+    
+    return new Promise<void>((resolve, reject) => {
+      const eventSource = new EventSource(`${workspaceApi.defaults.baseURL}${url}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+        },
+        body,
+      })
+
+      eventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data)
+          if (data.type === 'message') {
+            onMessage(data.content)
+          } else if (data.type === 'end') {
+            eventSource.close()
+            resolve()
+          }
+        } catch (error) {
+          onError(error instanceof Error ? error : new Error('Parse error'))
+        }
+      }
+
+      eventSource.onerror = (error) => {
+        eventSource.close()
+        onError(error instanceof Error ? error : new Error('Stream error'))
+        reject(error)
+      }
+    })
+  },
 
   listFiles: () => api.get<FileInfo[]>(workspaceApi, '/api/workspace/files'),
 
@@ -133,5 +200,11 @@ export const workspaceService = {
     return workspaceApi.get(`/api/kanban/boards/${boardId}/files/${encodeURIComponent(filePath)}`, {
       responseType: 'blob'
     })
-  }
+  },
+
+  getProjectSummaries: (projectId: number) => 
+    api.get<ProjectSummary[]>(workspaceApi, `/api/projects/${projectId}/summaries`),
+
+  createOrUpdateProjectSummary: (projectId: number, data: CreateOrUpdateProjectSummaryRequest) =>
+    api.post<ProjectSummary>(workspaceApi, `/api/projects/${projectId}/summaries`, data),
 }

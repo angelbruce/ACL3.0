@@ -125,6 +125,16 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/admin/PermissionList.vue'),
       },
       {
+        path: 'projects',
+        name: 'Projects',
+        component: () => import('@/views/workspace/ProjectList.vue'),
+      },
+      {
+        path: 'projects/:id',
+        name: 'ProjectDetail',
+        component: () => import('@/views/workspace/ProjectDetail.vue'),
+      },
+      {
         path: 'workspace',
         name: 'Workspace',
         component: () => import('@/views/workspace/WorkspaceFiles.vue'),

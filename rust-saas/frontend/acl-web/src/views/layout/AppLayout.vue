@@ -14,17 +14,15 @@ const authStore = useAuthStore()
 const sidebarOpen = ref(true)
 const sidebarCollapsed = ref(false)
 const adminExpanded = ref(false)
+const configExpanded = ref(false)
 
 const navItems = [
-  { path: '/sessions', name: '会话', icon: MessageSquare },
-  { path: '/agents', name: 'Agent', icon: Bot },
-  { path: '/flows', name: '工作流', icon: Workflow },
-  { path: '/models', name: '模型', icon: Settings },
-  { path: '/tools', name: '工具', icon: Wrench },
-  { path: '/mcp-servers', name: 'MCP服务器', icon: Server },
+  { path: '/sessions', name: '探索中心', icon: MessageSquare },
   { path: '/workspace', name: '工作区', icon: FolderOpen },
-  { path: '/kanban', name: '看板', icon: ClipboardList },
-  { path: '/subscriptions', name: '订阅', icon: Bell },
+  { path: '/flows', name: '自动化', icon: Workflow },
+  { path: '/agents', name: '智能仓库', icon: Bot },
+  { path: '/kanban', name: '公示中心', icon: ClipboardList },
+  { path: '/subscriptions', name: '我的订阅', icon: Bell },
 ]
 
 const adminNavItems = [
@@ -35,6 +33,13 @@ const adminNavItems = [
   { path: '/admin/menus', name: '菜单管理', icon: FolderTree },
   { path: '/admin/permissions', name: '权限管理', icon: Key },
 ]
+
+const configNavItems = [
+  { path: '/models', name: '模型管理', icon: Settings },
+  { path: '/mcp-servers', name: 'MCP注册', icon: Server },
+  { path: '/tools', name: '工具列表', icon: Wrench },
+]
+
 
 const isActive = (path: string) => route.path.startsWith(path)
 
@@ -102,6 +107,35 @@ const toggleSidebar = () => {
             <span v-if="!sidebarCollapsed" class="text-sm">{{ item.name }}</span>
           </router-link>
 
+          
+            <!-- Config Section -->
+          <div v-if="!sidebarCollapsed" class="pt-4 mt-4 border-t border-surface-200">
+            <button
+              @click="configExpanded = !configExpanded"
+              class="w-full flex items-center gap-3 px-3 py-2.5 text-surface-500 hover:text-surface-700 hover:bg-surface-50 rounded-lg transition-all duration-150"
+            >
+              <Settings class="w-5 h-5 flex-shrink-0" />
+              <span class="text-sm flex-1 text-left">配置管理</span>
+              <span :class="['transform transition-transform', configExpanded ? 'rotate-180' : '']">▼</span>
+            </button>
+            <div v-show="configExpanded" class="mt-1 space-y-0.5 pl-4">
+              <router-link
+                v-for="item in configNavItems"
+                :key="item.path"
+                :to="item.path"
+                :class="[
+                  'flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-150 text-sm',
+                  isActive(item.path)
+                    ? 'bg-primary-50 text-primary-600 font-medium'
+                    : 'text-surface-500 hover:text-surface-700 hover:bg-surface-50',
+                ]"
+              >
+                <component :is="item.icon" class="w-4 h-4 flex-shrink-0" />
+                <span>{{ item.name }}</span>
+              </router-link>
+            </div>
+          </div>
+
           <!-- Admin Section -->
           <div v-if="!sidebarCollapsed" class="pt-4 mt-4 border-t border-surface-200">
             <button
@@ -129,6 +163,7 @@ const toggleSidebar = () => {
               </router-link>
             </div>
           </div>
+
         </nav>
 
         <!-- User section -->

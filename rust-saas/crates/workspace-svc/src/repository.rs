@@ -2,8 +2,14 @@ use chrono::Utc;
 use diesel::prelude::*;
 use diesel::r2d2::{self, ConnectionManager};
 use shared::errors::{ServiceError, ServiceResult};
-use shared::models::{KanbanBoard, KanbanItem, KanbanSubscription, CreateKanbanBoardRequest, UpdateKanbanBoardRequest};
-use shared::schema::{kanban_boards, kanban_items, kanban_subscriptions};
+use shared::models::{
+    KanbanBoard, KanbanItem, KanbanSubscription, CreateKanbanBoardRequest, UpdateKanbanBoardRequest,
+    Project, ProjectFile, ProjectMessage, ProjectSummary, ProjectWithNames,
+    CreateProjectRequest, UpdateProjectRequest,
+    CreateProjectFileRequest, UpdateProjectFileRequest, AddProjectMessageRequest,
+    CreateOrUpdateProjectSummaryRequest
+};
+use shared::schema::{kanban_boards, kanban_items, kanban_subscriptions, projects, project_files, project_messages, project_summaries, agents, llm_models};
 use std::env;
 
 pub struct WorkspaceRepository {
@@ -18,6 +24,423 @@ impl WorkspaceRepository {
             .build(manager)
             .expect("Failed to create pool.");
         WorkspaceRepository { pool }
+    }
+
+    pub async fn get_projects_by_user(&self, user_id: i64) -> ServiceResult<Vec<ProjectWithNames>> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        
+        let project_list: Vec<Project> = projects::table
+            .filter(projects::user_id.eq(user_id))
+            .order(projects::last_accessed_at.desc())
+            .load(&mut conn)?;
+        
+        let mut result: Vec<ProjectWithNames> = Vec::new();
+        
+        for p in project_list {
+            let model_name = if let Some(model_id) = p.model_id {
+                llm_models::table
+                    .filter(llm_models::id.eq(model_id))
+                    .first::<shared::models::LlmModel>(&mut conn)
+                    .optional()?
+                    .map(|m| m.name)
+            } else {
+                None
+            };
+            
+            let agent_name = if let Some(agent_id) = p.agent_id {
+                agents::table
+                    .filter(agents::id.eq(agent_id))
+                    .first::<shared::models::Agent>(&mut conn)
+                    .optional()?
+                    .map(|a| a.name)
+            } else {
+                None
+            };
+            
+            result.push(ProjectWithNames {
+                id: p.id,
+                user_id: p.user_id,
+                name: p.name,
+                purpose: p.purpose,
+                description: p.description,
+                model_id: p.model_id,
+                agent_id: p.agent_id,
+                model_name,
+                agent_name,
+                last_accessed_at: p.last_accessed_at,
+                created_at: p.created_at,
+                updated_at: p.updated_at,
+            });
+        }
+        
+        Ok(result)
+    }
+
+    pub async fn get_project_by_id(&self, project_id: i64) -> ServiceResult<Option<ProjectWithNames>> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        
+        let project = projects::table
+            .filter(projects::id.eq(project_id))
+            .first::<Project>(&mut conn)
+            .optional()?;
+        
+        if let Some(p) = project {
+            let model_name = if let Some(model_id) = p.model_id {
+                llm_models::table
+                    .filter(llm_models::id.eq(model_id))
+                    .first::<shared::models::LlmModel>(&mut conn)
+                    .optional()?
+                    .map(|m| m.name)
+            } else {
+                None
+            };
+            
+            let agent_name = if let Some(agent_id) = p.agent_id {
+                agents::table
+                    .filter(agents::id.eq(agent_id))
+                    .first::<shared::models::Agent>(&mut conn)
+                    .optional()?
+                    .map(|a| a.name)
+            } else {
+                None
+            };
+            
+            Ok(Some(ProjectWithNames {
+                id: p.id,
+                user_id: p.user_id,
+                name: p.name,
+                purpose: p.purpose,
+                description: p.description,
+                model_id: p.model_id,
+                agent_id: p.agent_id,
+                model_name,
+                agent_name,
+                last_accessed_at: p.last_accessed_at,
+                created_at: p.created_at,
+                updated_at: p.updated_at,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub async fn create_project(&self, user_id: i64, req: CreateProjectRequest) -> ServiceResult<Project> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        
+        let now = Utc::now().naive_utc();
+        
+        let project = diesel::insert_into(projects::table)
+            .values((
+                projects::user_id.eq(user_id),
+                projects::name.eq(req.name),
+                projects::purpose.eq(req.purpose),
+                projects::description.eq(req.description),
+                projects::model_id.eq(req.model_id),
+                projects::agent_id.eq(req.agent_id),
+                projects::last_accessed_at.eq(now),
+                projects::created_at.eq(now),
+                projects::updated_at.eq(now),
+            ))
+            .returning(Project::as_select())
+            .get_result(&mut conn)?;
+        
+        let workspace_root = env::var("WORKSPACE_ROOT").unwrap_or_else(|_| "/workspace_storage".to_string());
+        let user_dir = std::path::Path::new(&workspace_root).join(user_id.to_string());
+        let project_dir = user_dir.join(project.id.to_string());
+        
+        if let Err(e) = std::fs::create_dir_all(&project_dir) {
+            tracing::warn!("Failed to create project directory: {}", e);
+        }
+        
+        Ok(project)
+    }
+
+    pub async fn update_project(&self, project_id: i64, user_id: i64, req: UpdateProjectRequest) -> ServiceResult<Project> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        
+        let now = Utc::now().naive_utc();
+        
+        let project = diesel::update(
+            projects::table
+                .filter(projects::id.eq(project_id))
+                .filter(projects::user_id.eq(user_id))
+        )
+        .set((
+            projects::name.eq(req.name),
+            projects::description.eq(req.description),
+            projects::model_id.eq(req.model_id),
+            projects::agent_id.eq(req.agent_id),
+            projects::updated_at.eq(now),
+        ))
+        .returning(Project::as_select())
+        .get_result(&mut conn)?;
+        
+        Ok(project)
+    }
+
+    pub async fn delete_project(&self, project_id: i64, user_id: i64) -> ServiceResult<()> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        
+        diesel::delete(
+            project_files::table
+                .filter(project_files::project_id.eq(project_id))
+        )
+        .execute(&mut conn)?;
+        
+        diesel::delete(
+            project_messages::table
+                .filter(project_messages::project_id.eq(project_id))
+        )
+        .execute(&mut conn)?;
+        
+        diesel::delete(
+            project_summaries::table
+                .filter(project_summaries::project_id.eq(project_id))
+        )
+        .execute(&mut conn)?;
+        
+        let result = diesel::delete(
+            projects::table
+                .filter(projects::id.eq(project_id))
+                .filter(projects::user_id.eq(user_id))
+        )
+        .execute(&mut conn)?;
+        
+        if result == 0 {
+            return Err(ServiceError::NotFound);
+        }
+        
+        Ok(())
+    }
+
+    pub async fn get_project_files(&self, project_id: i64, user_id: i64) -> ServiceResult<Vec<ProjectFile>> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        
+        let _project = projects::table
+            .filter(projects::id.eq(project_id))
+            .filter(projects::user_id.eq(user_id))
+            .first::<Project>(&mut conn)?;
+        
+        let files = project_files::table
+            .filter(project_files::project_id.eq(project_id))
+            .order(project_files::created_at.asc())
+            .load(&mut conn)?;
+        
+        Ok(files)
+    }
+
+    pub async fn create_project_file(&self, project_id: i64, user_id: i64, req: CreateProjectFileRequest) -> ServiceResult<ProjectFile> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        
+        let now = Utc::now().naive_utc();
+        
+        diesel::update(
+            projects::table
+                .filter(projects::id.eq(project_id))
+                .filter(projects::user_id.eq(user_id))
+        )
+        .set(projects::updated_at.eq(now))
+        .execute(&mut conn)?;
+        
+        let file = diesel::insert_into(project_files::table)
+            .values((
+                project_files::project_id.eq(project_id),
+                project_files::name.eq(req.name),
+                project_files::content.eq(req.content),
+                project_files::created_at.eq(now),
+                project_files::updated_at.eq(now),
+            ))
+            .returning(ProjectFile::as_select())
+            .get_result(&mut conn)?;
+        
+        Ok(file)
+    }
+
+    pub async fn update_project_file(&self, file_id: i64, user_id: i64, req: UpdateProjectFileRequest) -> ServiceResult<ProjectFile> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        
+        let file = project_files::table
+            .filter(project_files::id.eq(file_id))
+            .first::<ProjectFile>(&mut conn)
+            .optional()?;
+        
+        if file.is_none() {
+            return Err(ServiceError::NotFound);
+        }
+        
+        let project = projects::table
+            .filter(projects::id.eq(file.as_ref().unwrap().project_id))
+            .filter(projects::user_id.eq(user_id))
+            .first::<Project>(&mut conn)
+            .optional()?;
+        
+        if project.is_none() {
+            return Err(ServiceError::NotFound);
+        }
+        
+        let now = Utc::now().naive_utc();
+        
+        let updated_file = diesel::update(project_files::table.filter(project_files::id.eq(file_id)))
+            .set((
+                project_files::content.eq(req.content),
+                project_files::updated_at.eq(now),
+            ))
+            .returning(ProjectFile::as_select())
+            .get_result(&mut conn)?;
+        
+        Ok(updated_file)
+    }
+
+    pub async fn delete_project_file(&self, file_id: i64, user_id: i64) -> ServiceResult<()> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        
+        let file = project_files::table
+            .filter(project_files::id.eq(file_id))
+            .first::<ProjectFile>(&mut conn)
+            .optional()?;
+        
+        if file.is_none() {
+            return Err(ServiceError::NotFound);
+        }
+        
+        let project = projects::table
+            .filter(projects::id.eq(file.as_ref().unwrap().project_id))
+            .filter(projects::user_id.eq(user_id))
+            .first::<Project>(&mut conn)
+            .optional()?;
+        
+        if project.is_none() {
+            return Err(ServiceError::NotFound);
+        }
+        
+        diesel::delete(
+            project_summaries::table
+                .filter(project_summaries::file_name.eq(file.as_ref().unwrap().name.clone()))
+                .filter(project_summaries::project_id.eq(file.as_ref().unwrap().project_id))
+        )
+        .execute(&mut conn)?;
+        
+        let result = diesel::delete(project_files::table.filter(project_files::id.eq(file_id)))
+            .execute(&mut conn)?;
+        
+        if result == 0 {
+            return Err(ServiceError::NotFound);
+        }
+        
+        Ok(())
+    }
+
+    pub async fn get_project_messages(&self, project_id: i64, user_id: i64) -> ServiceResult<Vec<ProjectMessage>> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        
+        let _project = projects::table
+            .filter(projects::id.eq(project_id))
+            .filter(projects::user_id.eq(user_id))
+            .first::<Project>(&mut conn)?;
+        
+        let messages = project_messages::table
+            .filter(project_messages::project_id.eq(project_id))
+            .order(project_messages::created_at.asc())
+            .load(&mut conn)?;
+        
+        Ok(messages)
+    }
+
+    pub async fn add_project_message(&self, project_id: i64, user_id: i64, req: AddProjectMessageRequest) -> ServiceResult<ProjectMessage> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        
+        let now = Utc::now().naive_utc();
+        
+        diesel::update(
+            projects::table
+                .filter(projects::id.eq(project_id))
+                .filter(projects::user_id.eq(user_id))
+        )
+        .set(projects::last_accessed_at.eq(now))
+        .execute(&mut conn)?;
+        
+        let message = diesel::insert_into(project_messages::table)
+            .values((
+                project_messages::project_id.eq(project_id),
+                project_messages::role.eq(req.role),
+                project_messages::content.eq(req.content),
+                project_messages::created_at.eq(now),
+            ))
+            .returning(ProjectMessage::as_select())
+            .get_result(&mut conn)?;
+        
+        Ok(message)
+    }
+
+    pub async fn get_project_summaries(&self, project_id: i64, user_id: i64) -> ServiceResult<Vec<ProjectSummary>> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        
+        let _project = projects::table
+            .filter(projects::id.eq(project_id))
+            .filter(projects::user_id.eq(user_id))
+            .first::<Project>(&mut conn)?;
+        
+        let summaries = project_summaries::table
+            .filter(project_summaries::project_id.eq(project_id))
+            .filter(project_summaries::user_id.eq(user_id))
+            .order(project_summaries::updated_at.desc())
+            .load(&mut conn)?;
+        
+        Ok(summaries)
+    }
+
+    pub async fn create_or_update_project_summary(
+        &self,
+        project_id: i64,
+        user_id: i64,
+        req: CreateOrUpdateProjectSummaryRequest
+    ) -> ServiceResult<ProjectSummary> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        
+        let project = projects::table
+            .filter(projects::id.eq(project_id))
+            .filter(projects::user_id.eq(user_id))
+            .first::<Project>(&mut conn)
+            .optional()?;
+        
+        if project.is_none() {
+            return Err(ServiceError::NotFound);
+        }
+        
+        let now = Utc::now().naive_utc();
+        
+        let existing = project_summaries::table
+            .filter(project_summaries::project_id.eq(project_id))
+            .filter(project_summaries::file_name.eq(&req.file_name))
+            .filter(project_summaries::user_id.eq(user_id))
+            .first::<ProjectSummary>(&mut conn)
+            .optional()?;
+        
+        if let Some(existing_summary) = existing {
+            let updated = diesel::update(project_summaries::table.filter(project_summaries::id.eq(existing_summary.id)))
+                .set((
+                    project_summaries::summary.eq(&req.summary),
+                    project_summaries::updated_at.eq(now),
+                ))
+                .returning(ProjectSummary::as_select())
+                .get_result(&mut conn)?;
+            
+            return Ok(updated);
+        }
+        
+        let summary = diesel::insert_into(project_summaries::table)
+            .values((
+                project_summaries::user_id.eq(user_id),
+                project_summaries::project_id.eq(project_id),
+                project_summaries::file_name.eq(&req.file_name),
+                project_summaries::summary.eq(&req.summary),
+                project_summaries::created_at.eq(now),
+                project_summaries::updated_at.eq(now),
+            ))
+            .returning(ProjectSummary::as_select())
+            .get_result(&mut conn)?;
+        
+        Ok(summary)
     }
 
     pub async fn get_public_kanban_boards(&self) -> ServiceResult<Vec<KanbanBoard>> {
@@ -71,7 +494,7 @@ impl WorkspaceRepository {
             return Err(ServiceError::BadRequest("At least one field must be provided for update".to_string()));
         }
         
-        let mut update_query = diesel::update(
+        let board = diesel::update(
             kanban_boards::table
                 .filter(kanban_boards::id.eq(board_id))
                 .filter(kanban_boards::created_by.eq(user_id))
@@ -80,9 +503,7 @@ impl WorkspaceRepository {
             kanban_boards::description.eq(req.description),
             kanban_boards::is_public.eq(req.is_public.unwrap_or(false)),
             kanban_boards::updated_at.eq(now)
-        ));
-        
-        let board = update_query
+        ))
             .returning(KanbanBoard::as_select())
             .get_result(&mut conn)?;
         

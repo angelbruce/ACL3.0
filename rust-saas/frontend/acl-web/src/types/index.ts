@@ -196,6 +196,7 @@ export interface LlmRequest {
   messages: ChatMessage[]
   agent_id?: number
   stream: boolean
+  project_id?: number
 }
 
 // MCP types
@@ -250,6 +251,69 @@ export interface ErrorResponse {
 export interface ApiResponse<T> {
   data?: T
   error?: string
+}
+
+// Workspace/Project types
+export type ProjectPurpose = 'article' | 'coding'
+
+export interface Project {
+  id: number
+  name: string
+  purpose: ProjectPurpose
+  description: string | null
+  model_id: number | null
+  agent_id: number | null
+  model_name?: string
+  agent_name?: string
+  last_accessed_at: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ProjectFile {
+  id: number
+  project_id: number
+  name: string
+  content: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ProjectSettings {
+  model_id: number | null
+  agent_id: number | null
+  name: string | null
+  description: string | null
+}
+
+export interface CreateProjectRequest {
+  name: string
+  purpose: ProjectPurpose
+  description?: string
+  model_id?: number | null
+  agent_id?: number | null
+}
+
+export interface UpdateProjectRequest {
+  name: string
+  description: string | null
+  model_id: number | null
+  agent_id: number | null
+}
+
+export interface ProjectChatMessage {
+  id: number
+  project_id: number
+  content: string
+  role: 'user' | 'assistant' | 'system'
+  created_at: string
+}
+
+export interface ProjectChatRequest {
+  project_id: number
+  model_id: number
+  agent_id?: number
+  message: string
 }
 
 // Admin types
