@@ -1,4 +1,5 @@
-use axum::{extract::{Path, Extension}, Json, http::{HeaderName, HeaderValue}, response::IntoResponse};
+use axum::{extract::{Path, Extension}, Json, http::{HeaderName, HeaderValue}, response::IntoResponse,response::Response};
+use axum::body::Body;
 use chrono::{Utc, DateTime};
 use mime_guess::from_path;
 use serde::{Serialize, Deserialize};
@@ -15,9 +16,15 @@ use shared::utils::Claims;
 use std::collections::HashMap;
 use std::env;
 use std::fs;
+use std::fs::File;
+use std::io::Read;
 use std::path::PathBuf;
-
+use std::thread;
+use tokio::runtime::Runtime; 
+use tokio::task;
+use futures::Stream;
 use crate::repository::WorkspaceRepository;
+use crate::voice::{Article};
 
 fn get_workspace_root() -> PathBuf {
     PathBuf::from(env::var("WORKSPACE_ROOT").unwrap_or_else(|_| "./workspace_storage".to_string()))
@@ -99,7 +106,8 @@ pub async fn create_project_file(
     Json(req): Json<CreateProjectFileRequest>,
 ) -> ServiceResult<Json<ProjectFile>> {
     let repo = WorkspaceRepository::new();
-    let file = repo.create_project_file(project_id, claims.user_id, req).await?;
+    let file = repo.create_project_file(project_id, claims.user_id, req).await?;   
+
     Ok(Json(file))
 }
 
@@ -109,9 +117,55 @@ pub async fn update_project_file(
     Json(req): Json<UpdateProjectFileRequest>,
 ) -> ServiceResult<Json<ProjectFile>> {
     let repo = WorkspaceRepository::new();
+    let content = &req.content.clone();
     let file = repo.update_project_file(file_id, claims.user_id, req).await?;
+
+    if !content.is_empty() {
+        let article = Article {
+            user_id: claims.user_id,
+            project_id: file.project_id,
+            article_id: file.id,
+            content: content.clone(),
+            voice_type: String::from("xtts"),
+            voice_seed: 1,
+            voice_speed: 1.5,
+        };
+
+        task::spawn( async move {
+            println!("{:?}", article);  
+            match Article::create_voice(article.clone()).await {
+                Ok(_) => println!("Voice created successfully"),
+                Err(e) => println!("Error creating voice: {:?}", e),
+            }
+        });
+    }
+
     Ok(Json(file))
 }
+
+pub async fn get_project_file_voice(
+    Extension(claims): Extension<Claims>,
+    Path(file_id): Path<i64>,
+) -> ServiceResult<Body> {
+    let repo = WorkspaceRepository::new();
+    let file = repo.get_project_file_by_id(file_id, claims.user_id).await.map_err(|e| ServiceError::BadRequest(e.to_string()))?;
+    let file_path = Article::get_voice_path(claims.user_id, file.project_id, file.id, "xtts".to_string(), 1).await.map_err(|e| ServiceError::BadRequest(e.to_string()))?;
+    let file_stream = Article::create_file_stream(file_path.clone(), 8192);
+    let body: Body = Body::from_stream(file_stream);
+    Ok(body)
+}
+
+pub async fn get_project_file_voice_link(
+    Extension(claims): Extension<Claims>,
+    Path(file_id): Path<i64>,
+) -> ServiceResult<Json<String>> {
+
+    let repo = WorkspaceRepository::new();
+    let file = repo.get_project_file_by_id(file_id, claims.user_id).await.map_err(|e| ServiceError::BadRequest(e.to_string()))?;
+    let file_path = Article::get_voice_link_path(claims.user_id, file.project_id, file.id, "xtts".to_string(), 1).await.map_err(|e| ServiceError::BadRequest(e.to_string()))?;
+    Ok(Json(file_path.to_string()))
+}
+
 
 pub async fn delete_project_file(
     Extension(claims): Extension<Claims>,

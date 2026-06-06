@@ -8,6 +8,7 @@ use tokio::net::TcpListener;
 mod routes;
 mod handlers;
 mod repository;
+mod voice;
 
 #[tokio::main]
 async fn main() {
@@ -19,6 +20,7 @@ async fn main() {
     let addr = format!("0.0.0.0:{}", port);
 
     let app = create_router();
+   
 
     tracing::info!("Workspace service listening on http://{}", addr);
 

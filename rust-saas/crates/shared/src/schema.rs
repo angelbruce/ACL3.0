@@ -269,6 +269,7 @@ table! {
         description -> Nullable<Text>,
         model_id -> Nullable<Int8>,
         agent_id -> Nullable<Int8>,
+        status -> Nullable<Int8>,
         last_accessed_at -> Timestamp,
         created_at -> Timestamp,
         updated_at -> Timestamp,

@@ -1,4 +1,4 @@
-import { workspaceApi, api } from './client'
+import { workspaceApi, fetchStream, api } from './client'
 
 export interface FileInfo {
   name: string
@@ -207,4 +207,30 @@ export const workspaceService = {
 
   createOrUpdateProjectSummary: (projectId: number, data: CreateOrUpdateProjectSummaryRequest) =>
     api.post<ProjectSummary>(workspaceApi, `/api/projects/${projectId}/summaries`, data),
-}
+
+  
+  getArticleVoiceLink: (articleId:number): Promise<string> => {
+     return api.post<string>(workspaceApi, `/api/projects-files/voice/link/${articleId}`).then((res) => {
+       let data = res;
+       var baseURL = workspaceApi.defaults.baseURL
+        let link = baseURL + "/voice" + data
+        return new Promise((resolve) => resolve(link))
+     })
+  },
+
+  getArticleVoice: (articleId:number): Promise<Blob> => {
+    return new Promise<Blob>((resolve, reject) => {
+      let buffer = new Uint8Array()
+      fetchStream(`/api/projects-files/voice/${articleId}`, (value) => {
+        if(value != null) {
+          buffer  = new Uint8Array([...buffer, ...value])
+        } else {
+          let blob = new Blob([buffer], { type: 'audio/wav' })
+          resolve(blob)
+        }
+      }).catch((err) => {
+        reject(err)
+      })
+    })
+  },
+ }

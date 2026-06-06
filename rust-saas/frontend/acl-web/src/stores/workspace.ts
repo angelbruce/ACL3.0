@@ -205,6 +205,24 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     error.value = null
   }
 
+  const getArticleVoiceLink = async(articleId: number) =>{
+    return workspaceService.getArticleVoiceLink(articleId)
+  }
+
+
+  const getArticleVoice = async (articleId: number) => {
+    loading.value = true
+    error.value = null
+    try {
+       return workspaceService.getArticleVoice(articleId)
+    } catch (err: unknown) {
+      error.value = err instanceof Error ? err.message : 'Failed to get article voice'
+      throw err
+    } finally {
+      loading.value = false
+    }
+  }
+
   return {
     projects,
     currentProject,
@@ -225,5 +243,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     fetchProjectMessages,
     addProjectMessage,
     clearError,
+    getArticleVoice,
+    getArticleVoiceLink,
   }
 })

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Send, Loader2, Bot, User, Wrench, Copy, Check, ChevronDown, Settings, Brain, FileText, Plus, Trash2, X, Save } from 'lucide-vue-next'
+import { ArrowLeft, Send, Loader2, Bot, User, Wrench, Copy, Check, ChevronDown, Settings, Brain, FileText, Plus, Trash2, X, Save,Play } from 'lucide-vue-next'
 import { useWorkspaceStore, useLlmStore, useAuthStore, useAgentStore } from '@/stores'
 import { llmService, workspaceService, authService, type StreamResponse } from '@/api'
 import type { ProjectFile, LlmModel, Agent, ProjectChatMessage } from '@/types'
@@ -58,6 +58,25 @@ const getMessageIcon = (role: string) => {
   }
 }
 
+const playing = ref(false)
+let audioRef = ref<HTMLAudioElement>()
+
+const play = async (file: ProjectFile) => {
+    playing.value = true
+    // workspaceStore.getArticleVoice(file.id).then((blob) => {
+    //   audioRef.value.src = URL.createObjectURL(blob);
+    // })
+
+    workspaceStore.getArticleVoiceLink(file.id).then((link) => {
+      console.log(link)
+      audioRef.value.src = link
+      audioRef.value.play()
+      audioRef.value.onended = () => {
+        playing.value = false
+      }
+    })
+}
+
 const parseMarkdown = (text: string) => {
   let result = text
     .replace(/</g, '&lt;')
@@ -66,7 +85,8 @@ const parseMarkdown = (text: string) => {
     .replace(/'/g, '&apos;')
     .replace(/\\\n/g, '&nbsp;')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\[DONE\]/g, '<span class="done-badge">&nbsp;</span>')
+    .replace(/\[DONE\]/g, '')
+    // .replace(/\[DONE\]/g, '<span class="done-badge">&nbsp;</span>')
   
   const lines = result.split('\n')
   const processedLines: string[] = []
@@ -505,10 +525,22 @@ onMounted(async () => {
               v-for="file in projectFiles" 
               :key="file.id"
               @click="selectFile(file)"
-              :class="['flex items-center justify-between px-3 py-2 rounded-lg cursor-pointer transition-colors', selectedFile?.id === file.id ? 'bg-primary-50 text-primary-600' : 'text-surface-600 hover:bg-surface-50']"
+              :class="['flex items-center justify-between  py-1 rounded-md cursor-pointer transition-colors', selectedFile?.id === file.id ? 'bg-primary-50 text-primary-600' : 'text-surface-600 hover:bg-surface-50']"
             >
+              <div class="flex items-center ">
+                <button v-if="project?.purpose === 'article'"
+                  class="flex items-center 
+                  gap-1 
+                  px-1 py-1 mx-1
+                  bg-green-500 text-white rounded-md
+                  hover:bg-green-600 transition-colors 
+                  text-sm flex-shrink-0"
+                  @click="play(file)">
+                  <Play class="w-2 h-2" />
+                </button>
+              </div>
               <div class="flex items-center gap-2">
-                <FileText class="w-4 h-4" />
+                <FileText class="w-4 h-4" v-if="project?.purpose !== 'article'" />
                 <span class="text-sm truncate">{{ file.name }}</span>
               </div>
               <button 
@@ -560,9 +592,9 @@ onMounted(async () => {
             </div>
           </div>
 
-          <label class="flex items-center gap-2 px-3 py-2 text-sm text-surface-600">
-            <input type="checkbox" v-model="autoSaveEnabled" class="rounded border-surface-300" />
-            <span>自动保存小说内容</span>
+          <label class="flex items-center gap-2 px-3 py-2 text-sm text-surface-600" style="display: none;">
+            <input type="checkbox" disabled v-model="autoSaveEnabled" class="rounded border-surface-300" />
+            <span>自动保存</span>
           </label>
         </div>
       </div>
@@ -579,8 +611,14 @@ onMounted(async () => {
           <h1 class="font-semibold text-surface-800">{{ selectedFile?.name || '未选择文件' }}</h1>
           <p class="text-xs text-surface-400 mt-0.5">{{ projectMessages.length }} 条对话</p>
         </div>
+      
+        <div class="flex items-center">
+          <audio ref="audioRef" v-show="playing" class="gap-2 rounded-md" controls></audio>
+        </div>
+
         <button 
           v-if="selectedFile"
+          style="display: none;"
           @click="saveFile"
           class="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors text-sm flex-shrink-0"
         >
@@ -654,7 +692,13 @@ onMounted(async () => {
             </template>
 
              <highlightjs 
-              class="w-full h-10 resize-none border-none outline-none bg-transparent text-surface-700 leading-relaxed text-base" 
+              class="w-full h-10 resize-none border-none outline-none bg-transparent text-surface-700 leading-relaxed text-base
+              word-break-break-word
+              overflow-wrap-break-word
+              whitespace-pre-wrap
+              overflow-auto
+              leading-relaxed text-base
+              " 
               style="font-family: 'Georgia', 'Times New Roman', serif;"
               :code="streamingContent" 
               autodetect />

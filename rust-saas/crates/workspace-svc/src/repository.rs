@@ -256,6 +256,36 @@ impl WorkspaceRepository {
         Ok(file)
     }
 
+
+    pub async fn get_project_file_by_id(&self, file_id: i64,user_id: i64) -> ServiceResult<ProjectFile> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        let file = project_files::table
+            .filter(project_files::id.eq(file_id))
+            .first::<ProjectFile>(&mut conn)
+            .optional()?;
+        
+        if file.is_none() {
+            return Err(ServiceError::NotFound);
+        }
+        
+        Ok(file.unwrap())
+    }
+
+    pub async fn update_project_file_status(&self, file_id: i64, user_id: i64, status: i32) -> ServiceResult<()> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        
+        let now = Utc::now().naive_utc();
+        
+        diesel::update(project_files::table.filter(project_files::id.eq(file_id)))
+            .set((
+                project_files::status.eq(status),
+                project_files::updated_at.eq(now),
+            ))
+            .execute(&mut conn)?;
+        
+        Ok(())
+    }
+
     pub async fn update_project_file(&self, file_id: i64, user_id: i64, req: UpdateProjectFileRequest) -> ServiceResult<ProjectFile> {
         let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
         

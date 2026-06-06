@@ -71,8 +71,13 @@
     </div>
   </div>
 </template>
-
 <script setup lang="ts">
+import { loadmodule } from '@/utils/mx';
+
+onMounted(async () => {
+  await loadmodule();
+});
+
 import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router'
 import { Play, Circle, GitBranch, Square, CircleDot, ArrowBigUp } from 'lucide-vue-next';

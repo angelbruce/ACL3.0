@@ -35,13 +35,16 @@ export const API_BASE = {
 }
 
 // Create axios instances for each service
-const createApiClient = (baseURL: string): AxiosInstance => {
+const createApiClient = (baseURL: string, headers: Record<string, string> | null = null): AxiosInstance => {
+  if(headers === null || headers === undefined) {
+    headers =  {
+      'Content-Type': 'application/json',
+    }
+  }
   const client = axios.create({
     baseURL,
     timeout: 30000,
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers: headers,
   })
 
   // Request interceptor
@@ -92,6 +95,7 @@ const createApiClient = (baseURL: string): AxiosInstance => {
     }
   )
 
+  client.baseURL = baseURL
   return client
 }
 
@@ -125,4 +129,42 @@ export const api = {
     const response = await client.delete<T>(url)
     return response.data
   },
+}
+
+
+export const fetchStream = async (uri:String, handleChunk: (value: Uint8Array<ArrayBuffer> | undefined) => void) => {
+    try {
+      let headers : Record<string,string>  =  {}
+      const token = localStorage.getItem('access_token')
+      if (token) {
+        headers["authorization"] = `Bearer ${token}`
+      }
+      headers["content-type"] = "application/octet-stream"
+      let url = `${API_BASE.WORKSPACE}${uri}`
+      console.log(url)
+      const response = await fetch(url,{
+        method: 'POST',
+        headers: headers,
+      });
+      if(response == null || !response.ok) {
+        throw new Error(`Failed to fetch stream: ${response.status}`)
+      }
+
+      const reader = response?.body?.getReader()
+      if(reader == null) {
+        throw new Error(`Failed to get stream reader: ${response.status}`)
+      }
+
+      while(true) {
+        const {done,value} = await reader.read();
+        if(done) {
+          break
+        }
+        handleChunk(value)
+      }
+
+      handleChunk(undefined)
+    } catch(err) {
+        throw err
+    }
 }
