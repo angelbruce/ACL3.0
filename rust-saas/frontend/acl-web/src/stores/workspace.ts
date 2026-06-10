@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import type { Project, ProjectFile, ProjectChatMessage, CreateProjectRequest, UpdateProjectRequest, ProjectSettings } from '@/types'
+import type { Project, ProjectFile, 
+  ProjectChatMessage, CreateProjectRequest, 
+  UpdateProjectRequest, ProjectSettings,ProjectContainerConfig } from '@/types'
 import { workspaceService } from '@/api'
 
 export const useWorkspaceStore = defineStore('workspace', () => {
@@ -10,6 +12,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const projectMessages = ref<ProjectChatMessage[]>([])
   const loading = ref(false)
   const error = ref<string | null>(null)
+  const projectContainerConfigs = ref<ProjectContainerConfig[] | null>(null)
 
   const fetchProjects = async () => {
     loading.value = true
@@ -223,12 +226,42 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
+  const getProjectContainerConfigs = async (projectId: number) => {
+    loading.value = true
+    error.value = null
+    try {
+      projectContainerConfigs.value = await workspaceService.getProjectContainerConfigs(projectId)
+      return projectContainerConfigs.value
+    } catch (err: unknown) {
+      error.value = err instanceof Error ? err.message : 'Failed to get project container configs'
+      throw err
+    } finally {
+      loading.value = false
+    }
+  }
+
+   const saveProjectContainerConfigs = async (projectId: number, configs: ProjectContainerConfig[]) => {
+    loading.value = true
+    error.value = null
+    try {
+      await workspaceService.saveProjectContainerConfigs(projectId, configs)
+      projectContainerConfigs.value = configs
+    } catch (err: unknown) {
+      error.value = err instanceof Error ? err.message : 'Failed to save project container configs'
+      throw err
+    } finally {
+      loading.value = false
+    }
+  }
+
+
   return {
     projects,
     currentProject,
     projectFiles,
     projectMessages,
     loading,
+    projectContainerConfigs,
     error,
     fetchProjects,
     fetchProject,
@@ -245,5 +278,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     clearError,
     getArticleVoice,
     getArticleVoiceLink,
+    getProjectContainerConfigs,
+    saveProjectContainerConfigs,
   }
 })

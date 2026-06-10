@@ -7,10 +7,14 @@ use shared::models::{
     Project, ProjectFile, ProjectMessage, ProjectSummary, ProjectWithNames,
     CreateProjectRequest, UpdateProjectRequest,
     CreateProjectFileRequest, UpdateProjectFileRequest, AddProjectMessageRequest,
-    CreateOrUpdateProjectSummaryRequest
+    CreateOrUpdateProjectSummaryRequest, ProjectContainerConfig
 };
-use shared::schema::{kanban_boards, kanban_items, kanban_subscriptions, projects, project_files, project_messages, project_summaries, agents, llm_models};
+use shared::schema::{kanban_boards, kanban_items, kanban_subscriptions, projects,
+     project_files, project_messages, project_container_configs,
+     project_summaries, agents, llm_models
+    };
 use std::env;
+use std::ops::Index;
 
 pub struct WorkspaceRepository {
     pool: r2d2::Pool<ConnectionManager<PgConnection>>,
@@ -29,6 +33,7 @@ impl WorkspaceRepository {
     pub async fn get_projects_by_user(&self, user_id: i64) -> ServiceResult<Vec<ProjectWithNames>> {
         let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
         
+        println!("1");
         let project_list: Vec<Project> = projects::table
             .filter(projects::user_id.eq(user_id))
             .order(projects::last_accessed_at.desc())
@@ -36,6 +41,7 @@ impl WorkspaceRepository {
         
         let mut result: Vec<ProjectWithNames> = Vec::new();
         
+        println!("2");
         for p in project_list {
             let model_name = if let Some(model_id) = p.model_id {
                 llm_models::table
@@ -47,6 +53,7 @@ impl WorkspaceRepository {
                 None
             };
             
+        println!("3");
             let agent_name = if let Some(agent_id) = p.agent_id {
                 agents::table
                     .filter(agents::id.eq(agent_id))
@@ -57,6 +64,7 @@ impl WorkspaceRepository {
                 None
             };
             
+        println!("4");
             result.push(ProjectWithNames {
                 id: p.id,
                 user_id: p.user_id,
@@ -242,11 +250,20 @@ impl WorkspaceRepository {
         .set(projects::updated_at.eq(now))
         .execute(&mut conn)?;
         
+        let mut file_name = req.name.clone();
+        let mut file_dir = "".to_string();
+        if let Some(idx) = file_name.rfind('/') {
+            file_dir = file_name[0..idx].to_string();
+            file_name = file_name[idx + 1..].to_string();
+        }
+
         let file = diesel::insert_into(project_files::table)
             .values((
                 project_files::project_id.eq(project_id),
-                project_files::name.eq(req.name),
+                project_files::name.eq(file_name),
                 project_files::content.eq(req.content),
+                project_files::directory.eq(file_dir),
+                project_files::state.eq(0),
                 project_files::created_at.eq(now),
                 project_files::updated_at.eq(now),
             ))
@@ -278,7 +295,7 @@ impl WorkspaceRepository {
         
         diesel::update(project_files::table.filter(project_files::id.eq(file_id)))
             .set((
-                project_files::status.eq(status),
+                project_files::state.eq(status),
                 project_files::updated_at.eq(now),
             ))
             .execute(&mut conn)?;
@@ -355,6 +372,88 @@ impl WorkspaceRepository {
         
         if result == 0 {
             return Err(ServiceError::NotFound);
+        }
+        
+        Ok(())
+    }
+
+
+    pub async fn get_project_container_config(&self, project_id: i64) -> ServiceResult<Vec<ProjectContainerConfig>> {
+        let mut conn: r2d2::PooledConnection<ConnectionManager<PgConnection>> = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        
+        let config = project_container_configs::table
+            .filter(project_container_configs::project_id.eq(project_id))            
+            .load::<ProjectContainerConfig>(&mut conn)?;
+        
+        if config.is_empty() {
+            return Ok(Vec::new());
+        }
+        
+        Ok(config)
+    }
+
+    pub async fn save_project_container_config(&self,
+        creator_id: i64, 
+        project_id: i64,
+        datas: Vec<ProjectContainerConfig>) -> ServiceResult<Vec<ProjectContainerConfig>> {
+
+        let affected = self.delete_project_container_config_by_project_id(project_id).await;
+        match affected {
+            Ok(_) => {},
+            Err(e) =>{ }
+        };
+
+        let now = Utc::now().naive_utc();
+        let mut configs = Vec::new();
+        for project_container_config in datas {
+            let config = self.insert_project_container_config(creator_id, project_id, project_container_config).await?;
+            configs.push(config.clone());        
+        };
+       
+        Ok(configs)
+    }
+
+    pub async fn insert_project_container_config(&self,
+        creator_id: i64, 
+        project_id: i64,
+        project_container_config: ProjectContainerConfig) -> ServiceResult<ProjectContainerConfig> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        let now = Utc::now().naive_utc();
+        
+       let config = diesel::insert_into(project_container_configs::table)
+                .values((
+                project_container_configs::project_id.eq(project_id),
+                project_container_configs::project_dir.eq(project_container_config.project_dir),
+                project_container_configs::published_ports.eq(project_container_config.published_ports),
+                project_container_configs::volumes.eq(project_container_config.volumes),
+                project_container_configs::environment.eq(project_container_config.environment),
+                project_container_configs::command.eq(project_container_config.command),
+                project_container_configs::working_dir.eq(project_container_config.working_dir),
+                project_container_configs::tags.eq(project_container_config.tags),
+                project_container_configs::container_name.eq(project_container_config.container_name),
+                project_container_configs::cpu_usage.eq(project_container_config.cpu_usage),
+                project_container_configs::memory_usage.eq(project_container_config.memory_usage),
+                project_container_configs::image_name.eq(project_container_config.image_name),
+                project_container_configs::creator_id.eq(creator_id),
+                project_container_configs::created_at.eq(now),
+                project_container_configs::updated_at.eq(now),
+            ))
+            .returning(ProjectContainerConfig::as_select())
+            .get_result(&mut conn)?;
+
+        
+        Ok(config)
+    }
+ 
+    pub async fn delete_project_container_config_by_project_id(&self, project_id: i64) -> ServiceResult<()> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        
+        let result = diesel::delete(project_container_configs::table
+            .filter(project_container_configs::project_id.eq(project_id)))
+        .execute(&mut conn)?;
+        
+        if result == 0 {
+            return Err(ServiceError::DatabaseError("Project container config not found".to_string()));
         }
         
         Ok(())

@@ -95,7 +95,7 @@ const getMessageIcon = (type: SessionType) => {
 const parseMarkdown = (text: string) => {
   let result = text
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\[DONE\]/g, '<span class="done-badge">&nbsp;</span>')
+    .replace(/\[DONE\]/g, '.')
   
   const lines = result.split('\n')
   const processedLines: string[] = []
@@ -138,6 +138,60 @@ const parseMarkdown = (text: string) => {
     processedLines.push('</div>')
   }
   
+
+  let start = false,head = false;
+  for(let i = 0; i < processedLines.length; i++) {
+    let line = processedLines[i]
+    let match =  /([^\|]+?)\|/g;
+    let matches =[... line.matchAll(match)];
+    if(matches.length === 0) {
+      if(start) {
+        processedLines[i] = '</table>'+ processedLines[i]
+      }
+      start = false
+      continue
+    } 
+
+    if(!start) {
+      start = true
+      head = true
+    }
+
+    let list = []
+    for(let m of matches) {
+      list.push(m[1].replace(':---', '').trim())
+    }
+   
+    let flag = false;
+    for(let v of list) {
+      if(v !== '') {
+        flag = true
+        break
+      }
+    }
+
+    if(!flag) {
+      processedLines[i] = ""
+      continue
+    }
+
+    console.log('list', list)
+
+    let body='';
+    if(head) {
+      head = false
+      body =  '<table class="flex-1 w-full wrap text-center table table-striped table-hover table-bordered table-sm table-responsive-md ">'
+            + '<tr><td class="text-center font-bold border border-surface-900 px-2 py-2 bg-gray-600 text-white">' 
+            + list.join('</td><td class="text-center font-bold border border-surface-900 px-2 py-2 bg-white bg-gray-600 text-white">') + '</td></tr>'
+    }
+    else {
+      body = '<tr><td class="text-left border border-surface-900 px-2 py-2 bg-white">' 
+      + list.join('</td><td class="text-left border border-surface-900 px-2 py-2 bg-white">') + '</td></tr>'
+    }
+    
+    processedLines[i] = body
+  }
+
   return processedLines.join('\n')
 }
 
@@ -307,7 +361,7 @@ const formatTime = (dateStr: string) => new Date(dateStr).toLocaleTimeString('zh
     </div>
 
     <!-- Messages -->
-    <div ref="messagesContainer" class="flex-1 overflow-y-auto p-4 space-y-4">
+    <div ref="messagesContainer" class="flex-1 overflow-y-auto p-4 space-y-4 bg-white">
       <div v-if="loading" class="flex items-center justify-center h-full">
         <Loader2 class="w-8 h-8 animate-spin text-primary-500" />
       </div>
@@ -342,7 +396,7 @@ const formatTime = (dateStr: string) => new Date(dateStr).toLocaleTimeString('zh
             <Bot class="w-4 h-4" />
           </div>
           <div class="flex-1 max-w-3xl">
-            <div class="bg-surface-50 border-surface-200 rounded-xl p-4 border">
+            <div class="border-surface-200 rounded-xl p-4 border">
               <p class="whitespace-pre-wrap text-sm leading-relaxed typing-cursor text-surface-700" v-html="parseMarkdown(streamingContent || '')"></p>
             </div>
           </div>

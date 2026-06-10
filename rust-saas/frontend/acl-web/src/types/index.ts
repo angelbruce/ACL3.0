@@ -275,6 +275,7 @@ export interface ProjectFile {
   project_id: number
   name: string
   content: string | null
+  directory: string | null
   created_at: string
   updated_at: string
 }
@@ -316,5 +317,23 @@ export interface ProjectChatRequest {
   message: string
 }
 
+export interface ProjectContainerConfig {
+  id: number
+  project_id: number
+  project_dir: string
+  published_ports: string
+  image_name: string
+  volumes: string
+  environment: string
+  command: string
+  working_dir: string
+  tags: string
+  container_name: string
+  cpu_usage: string
+  memory_usage: string
+  creator_id: number
+  created_at: string
+  updated_at: string
+}
 // Admin types
 export * from './admin'

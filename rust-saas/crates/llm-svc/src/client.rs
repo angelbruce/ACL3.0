@@ -201,7 +201,7 @@ impl LlmClient {
             tools: Some(Vec::new()), // 即使没有工具，也要传空数组，确保 LLM 端正确识别
             stream: Some(true),
             max_tokens: Some(4096),
-            temperature: Some(0.7),
+            temperature: Some(0.3),
         };
 
         let response = self.build_request()

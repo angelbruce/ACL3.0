@@ -10,7 +10,7 @@ use shared::models::{
     Project, ProjectFile, ProjectMessage, ProjectSummary, ProjectWithNames,
     CreateProjectRequest as SharedCreateProjectRequest, UpdateProjectRequest as SharedUpdateProjectRequest,
     CreateProjectFileRequest, UpdateProjectFileRequest, AddProjectMessageRequest,
-    CreateOrUpdateProjectSummaryRequest
+    CreateOrUpdateProjectSummaryRequest, ProjectContainerConfig
 };
 use shared::utils::Claims;
 use std::collections::HashMap;
@@ -96,7 +96,11 @@ pub async fn list_project_files(
     Path(project_id): Path<i64>,
 ) -> ServiceResult<Json<Vec<ProjectFile>>> {
     let repo = WorkspaceRepository::new();
-    let files = repo.get_project_files(project_id, claims.user_id).await?;
+    let data = repo.get_project_files(project_id, claims.user_id).await;
+    if data.is_err() {
+        return Err(data.err().unwrap());
+    }
+    let files = data.unwrap_or_default();  
     Ok(Json(files))
 }
 
@@ -119,8 +123,13 @@ pub async fn update_project_file(
     let repo = WorkspaceRepository::new();
     let content = &req.content.clone();
     let file = repo.update_project_file(file_id, claims.user_id, req).await?;
+    let project = repo.get_project_by_id(file.project_id).await.map_err(|e| ServiceError::BadRequest(e.to_string()))?;
 
-    if !content.is_empty() {
+    if project.is_none() {
+        return Err(ServiceError::NotFound);
+    }
+
+    if !content.is_empty() && project.unwrap().purpose == "article" {
         let article = Article {
             user_id: claims.user_id,
             project_id: file.project_id,
@@ -464,3 +473,33 @@ pub async fn download_shared_file(
     ];
     Ok((headers, content))
 }
+
+pub async fn get_project_container_config(
+    Extension(claims): Extension<Claims>,
+    Path(project_id):Path<i64>,
+) -> ServiceResult<Json<Vec<ProjectContainerConfig>>> {
+    let repo = WorkspaceRepository::new();
+    println!("{:?}", project_id);
+    let config = repo.get_project_container_config(project_id).await;    
+    match config {
+        Ok(config) => Ok(Json(config)),
+        Err(e) => {
+           Ok(Json(Vec::new()))
+        },
+    }
+}
+
+
+pub async fn save_project_container_config(
+    Extension(claims): Extension<Claims>,
+    Path(project_id): Path<i64>,
+    Json(req): Json<Vec<ProjectContainerConfig>>,    
+) -> ServiceResult<Json<Vec<ProjectContainerConfig>>> {
+    let repo = WorkspaceRepository::new();
+    let config = repo.save_project_container_config(claims.user_id, project_id, req).await?;
+    Ok(Json(config))
+}
+
+
+
+//暂时不考虑越权问题 横向与纵向都不考虑。

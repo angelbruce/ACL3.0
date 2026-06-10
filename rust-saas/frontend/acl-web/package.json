@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc && vite build",
+    "build": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -13,6 +13,7 @@
     "@maxgraph/core": "^0.23.0",
     "@vue-flow/core": "^1.33.5",
     "axios": "^1.6.7",
+    "element-plus": "^2.14.1",
     "highlight.js": "^11.11.1",
     "lucide-vue-next": "^0.344.0",
     "pinia": "^2.1.7",

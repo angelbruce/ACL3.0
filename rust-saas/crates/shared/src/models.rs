@@ -363,6 +363,8 @@ pub struct ProjectFile {
     pub content: Option<String>,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
+    pub directory: Option<String>,
+    pub state: i32,
 }
 
 
@@ -375,6 +377,28 @@ pub struct ProjectMessage {
     pub role: String,
     pub content: String,
     pub created_at: NaiveDateTime,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Queryable, Selectable,Default)]
+#[diesel(table_name = crate::schema::project_container_configs)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct ProjectContainerConfig {
+    pub id: i64,
+    pub project_id: i64,
+    pub project_dir: String,
+    pub published_ports: String,
+    pub volumes: String,
+    pub environment: String,
+    pub command: String,
+    pub working_dir: String,
+    pub tags: String,
+    pub container_name: String,
+    pub cpu_usage: String,
+    pub memory_usage: String,
+    pub image_name: String,
+    pub creator_id: i64,
+    pub created_at: NaiveDateTime,
+    pub updated_at: NaiveDateTime,
 }
 
 

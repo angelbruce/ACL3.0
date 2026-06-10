@@ -1,10 +1,19 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, Send, Loader2, Bot, User, Wrench, Copy, Check, ChevronDown, Settings, Brain, FileText, Plus, Trash2, X, Save,Play } from 'lucide-vue-next'
+import { ArrowLeft, Send, Loader2, Bot, User, Wrench, Copy, Check, ChevronDown, Settings, Brain, FileText, Plus, 
+  Trash2, X, Save,Play, FolderCheck, FileArchiveIcon, FileCode, 
+  Train,
+  TrainIcon,
+  FileOutput,
+  LucideFolderOutput,
+  ComponentIcon,
+  CheckCircle2} from 'lucide-vue-next'
 import { useWorkspaceStore, useLlmStore, useAuthStore, useAgentStore } from '@/stores'
 import { llmService, workspaceService, authService, type StreamResponse } from '@/api'
 import type { ProjectFile, LlmModel, Agent, ProjectChatMessage } from '@/types'
+import { fa } from 'element-plus/es/locales.mjs'
+import ProjectContainerConfig from '@/views/workspace/ProjectContainerConfig.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -31,6 +40,7 @@ const selectedFile = ref<ProjectFile | null>(null)
 const fileContent = ref('')
 const editingFile = ref(true)
 const autoSaveEnabled = ref(true)
+const showHistory = ref(false)
 
 const projectId = computed(() => Number(route.params.id))
 const project = computed(() => workspaceStore.currentProject)
@@ -86,7 +96,6 @@ const parseMarkdown = (text: string) => {
     .replace(/\\\n/g, '&nbsp;')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\[DONE\]/g, '')
-    // .replace(/\[DONE\]/g, '<span class="done-badge">&nbsp;</span>')
   
   const lines = result.split('\n')
   const processedLines: string[] = []
@@ -128,8 +137,57 @@ const parseMarkdown = (text: string) => {
   if (inList) {
     processedLines.push('</div>')
   }
+
   
   return processedLines.join('\n')
+}
+
+interface Tree  {
+    id: number,
+    name:string,
+    data:ProjectFile | null,
+    children:Tree[],
+    expanded: boolean 
+}
+
+const createFileTree = (files: ProjectFile[]) : Tree[]  => {
+  let tree: Tree = {
+    id: 0,
+    name: '/', data: null,    children: [],
+    expanded: true,
+  }
+  
+  if (!files || files.length === 0) return [tree]
+
+  let paths: Record<string, Tree> | null = {}
+  let id = - 99999999
+
+  for(let file of files) {
+    var directory = file.directory || '/'
+    if(directory===null || directory.length === 0) directory= "/"
+    var segs = directory.split('/')
+    let currentPath: Tree | null = tree
+    var foot = "/";
+    for(let seg of segs) {
+      if(seg === null || seg.length === 0) continue
+      foot += seg + "/"
+      var path =  paths[foot] || null
+      if(path === null) {
+        path = { id: id++, name: seg, data: null, children: [], expanded: true }
+        paths[foot] = path
+        currentPath.children.push(path)
+      } 
+
+      currentPath = path
+    }
+
+    if(currentPath !== null) {
+      currentPath.children.push({id: file.id, name : file.name,data:file,children:[], expanded: true})
+    }
+  }
+
+  console.log('123',tree)
+   return [tree]
 }
 
 interface FileMatch {
@@ -286,9 +344,8 @@ const sendMessage = async () => {
       if (files.length > 0) {
         for(let file of files) {
           var filename = file.fileName || new Date().toLocaleString()
-          filename = filename.replace(/[:\/\\*?"<>|]/g, '_')
-            const newFile = await workspaceStore.createProjectFile(projectId.value, filename)
-            await saveFileAndContent(newFile.id, filename, file.content)
+          const newFile = await workspaceStore.createProjectFile(projectId.value, filename)
+          await saveFileAndContent(newFile.id, file.content)
         }
       }
     }
@@ -306,16 +363,9 @@ const sendMessage = async () => {
 
 }
 
-const saveFileAndContent = async (id:any,filename: string, content: string) => {
+const saveFileAndContent = async (id:any,content: string) => {
   try {
     await workspaceStore.updateProjectFile(id, content)
-    // const summaryContent = await generateSummary(content)
-    // if (summaryContent) {
-    //   await workspaceService.createOrUpdateProjectSummary(projectId.value, {
-    //     file_name: filename,
-    //     summary: summaryContent
-    //   })
-    // }
   } catch (err) {
     loadError.value = err instanceof Error ? err.message : '保存文件失败'
   }
@@ -402,7 +452,7 @@ const generateSummary = async (content: string): Promise<string | null> => {
       
       llmService.chatStream(
         {
-          model_id: selectedModel.value.id,
+          model_id: selectedModel?.value?.id || 0,
           messages: [{ role: 'user', content: summaryPrompt }],
           agent_id: selectedAgent.value?.id,
           stream: true,
@@ -440,6 +490,8 @@ watch(fileContent, () => {
     }
   }
 })
+
+const fileTree = computed(() => createFileTree(projectFiles.value))
 
 onMounted(async () => {
   loading.value = true
@@ -498,6 +550,18 @@ onMounted(async () => {
     loading.value = false
   }
 })
+
+
+const debugCode = ()=> {
+  if (!selectedFile.value) {
+    loadError.value = '请先选择文件'
+    return
+  }
+
+  debugVisible.value = true
+}
+
+let debugVisible = ref(false)
 </script>
 
 <template>
@@ -516,16 +580,17 @@ onMounted(async () => {
         <div class="p-3">
           <div class="flex items-center justify-between mb-2">
             <span class="text-sm font-medium text-surface-600">文件列表</span>
-            <button @click="openNewFileModal" class="p-1 text-surface-400 hover:text-surface-600 hover:bg-surface-100 rounded transition-colors">
+            <!-- <button @click="openNewFileModal" class="p-1 text-surface-400 hover:text-surface-600 hover:bg-surface-100 rounded transition-colors">
               <Plus class="w-4 h-4" />
-            </button>
+            </button> -->
           </div>
           <div class="space-y-1">
             <div 
+              v-if="project && project?.purpose === 'article'"
               v-for="file in projectFiles" 
               :key="file.id"
               @click="selectFile(file)"
-              :class="['flex items-center justify-between  py-1 rounded-md cursor-pointer transition-colors', selectedFile?.id === file.id ? 'bg-primary-50 text-primary-600' : 'text-surface-600 hover:bg-surface-50']"
+              :class="['flex items-center py-1 rounded-md cursor-pointer transition-colors', selectedFile?.id === file.id ? 'bg-primary-50 text-primary-600' : 'text-surface-600 hover:bg-surface-50']"
             >
               <div class="flex items-center ">
                 <button v-if="project?.purpose === 'article'"
@@ -550,6 +615,31 @@ onMounted(async () => {
                 <Trash2 class="w-3 h-3" />
               </button>
             </div>
+
+            <el-tree :data="fileTree" v-if="project && project?.purpose === 'coding'" 
+                check-strictly="true" 
+                highlight-current="true"
+                empty-text="暂无文件"
+                :node-key="'id'"
+                :default-expanded-keys="[0]"
+                overflow="auto"
+                >
+                 <template #default="{ data }" class="w-full overflow-x-auto">
+                    <div class="flex items-center gap-2"
+                      @click="selectFile(data.data)"     
+                    >
+                      <FileCode class="w-4 h-4" v-if="data.data" />
+                      <FolderCheck class="w-4 h-4" v-else />
+                     <span class="text-sm truncate flex-1">{{ data.name }}</span>
+                      <button 
+                        v-if="data.data"
+                        @click.stop="deleteFile(data.data)" class="p-1 opacity-0 hover:opacity-100 text-surface-400 hover:text-red-500 transition-all float-right">
+                        <Trash2 class="w-3 h-3" />
+                      </button>
+                    </div>
+                  </template>
+            </el-tree>
+       
             <div v-if="projectFiles.length === 0" class="text-center py-8 text-surface-400 text-sm">
               <FileText class="w-8 h-8 mx-auto mb-2 opacity-50" />
               <p>暂无文件</p>
@@ -559,9 +649,9 @@ onMounted(async () => {
       </div>
 
       <div class="p-3 border-t border-surface-200 flex-shrink-0">
-        <div class="flex items-center justify-between mb-2">
+        <!-- <div class="flex items-center justify-between mb-2">
           <span class="text-sm font-medium text-surface-600">设置</span>
-        </div>
+        </div> -->
         
         <div class="space-y-2">
           <div class="relative">
@@ -592,6 +682,25 @@ onMounted(async () => {
             </div>
           </div>
 
+          <div class="p-2 bg-white border-t border-surface-200 flex-shrink-0">
+            <form @submit.prevent="sendMessage" class="flex flex-col gap-2">
+              <textarea
+                v-model="inputMessage"
+                class="w-full px-3 py-2 bg-surface-100 border border-surface-200 rounded-lg  text-sm text-surface-600"
+              />
+              
+              <button 
+                type="submit" 
+                :disabled="sending || !selectedModel"
+                class="w-full px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-sm"
+              >
+                <Loader2 v-if="sending" class="w-4 h-4 animate-spin" />
+                <Send v-else class="w-4 h-4" />
+                <span>{{ sending ? '运行中...' : '开始' }}</span>
+              </button>
+            </form>
+          </div>
+
           <label class="flex items-center gap-2 px-3 py-2 text-sm text-surface-600" style="display: none;">
             <input type="checkbox" disabled v-model="autoSaveEnabled" class="rounded border-surface-300" />
             <span>自动保存</span>
@@ -613,7 +722,25 @@ onMounted(async () => {
         </div>
       
         <div class="flex items-center">
-          <audio ref="audioRef" v-show="playing" class="gap-2 rounded-md" controls></audio>
+          <div class="flex items-center gap-2  flex-row">
+            <button class="bg-surface-50 border px-4 py-2 border-surface-200 rounded-lg hover:bg-surface-100 transition-colors text-sm text-surface-600 flex items-center gap-2">
+             <LucideFolderOutput class="w-4 h-4" /> <span>导出</span>
+            </button>
+
+            <button class="bg-surface-50 border px-4 py-2 border-surface-200 rounded-lg hover:bg-surface-100 transition-colors text-sm text-surface-600 flex items-center gap-2"
+             v-if="project && project?.purpose === 'coding'"
+             @click="debugCode"
+             >
+             <ComponentIcon class="w-4 h-4" /> <span>调试</span>
+            </button>
+        
+            <button class="bg-surface-50 border px-4 py-2 border-surface-200 rounded-lg hover:bg-surface-100 transition-colors text-sm text-surface-600 flex items-center gap-2"
+             v-if="project && project?.purpose === 'coding'" 
+             @click="showHistory = !showHistory"
+             >
+             <CheckCircle2 class="w-4 h-4" /> <span>交互记录</span>
+            </button>
+          </div>
         </div>
 
         <button 
@@ -660,7 +787,7 @@ onMounted(async () => {
           </div>
         </div>
 
-        <div class="w-80 flex flex-col bg-surface-50 flex-shrink-0">
+        <div class="w-80 flex flex-col bg-surface-50 flex-shrink-0" v-if="showHistory">
           <div ref="messagesContainer" class="flex-1 overflow-y-auto p-2 space-y-2">
             <div v-if="loading" class="flex items-center justify-center h-full">
               <Loader2 class="w-6 h-6 animate-spin text-primary-500" />
@@ -690,9 +817,8 @@ onMounted(async () => {
                 </div>
               </div>
             </template>
-
              <highlightjs 
-              class="w-full h-10 resize-none border-none outline-none bg-transparent text-surface-700 leading-relaxed text-base
+              class="w-full h-30 resize-none border-none outline-none bg-transparent text-surface-700 leading-relaxed text-base
               word-break-break-word
               overflow-wrap-break-word
               whitespace-pre-wrap
@@ -703,66 +829,17 @@ onMounted(async () => {
               :code="streamingContent" 
               autodetect />
           </div>
-
-          <div class="p-2 bg-white border-t border-surface-200 flex-shrink-0">
-            <form @submit.prevent="sendMessage" class="flex flex-col gap-2">
-              <input
-                :value="inputMessage"
-                
-                class="w-full px-3 py-2 bg-surface-100 border border-surface-200 rounded-lg text-sm text-surface-600 cursor-not-allowed"
-              />
-              <button 
-                type="submit" 
-                :disabled="sending || !selectedModel"
-                class="w-full px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-sm"
-              >
-                <Loader2 v-if="sending" class="w-4 h-4 animate-spin" />
-                <Send v-else class="w-4 h-4" />
-                <span>{{ sending ? '运行中...' : '开始' }}</span>
-              </button>
-            </form>
-          </div>
         </div>
       </div>
     </div>
 
-    <div v-if="showNewFileModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div class="bg-white rounded-xl p-6 w-full max-w-md mx-4">
-        <div class="flex items-center justify-between mb-6">
-          <h2 class="text-xl font-semibold text-surface-800">新建文件</h2>
-          <button @click="closeNewFileModal" class="p-2 text-surface-400 hover:text-surface-600 hover:bg-surface-100 rounded-lg transition-colors">
-            <X class="w-5 h-5" />
-          </button>
-        </div>
-
-        <div>
-          <label class="block text-sm font-medium text-surface-700 mb-2">文件名称 *</label>
-          <input 
-            v-model="newFileName"
-            type="text"
-            placeholder="输入文件名称"
-            class="w-full px-4 py-2 border border-surface-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-            @keydown.enter="createNewFile"
-          />
-        </div>
-
-        <div class="flex gap-3 mt-6">
-          <button 
-            @click="closeNewFileModal"
-            class="flex-1 px-4 py-2 border border-surface-200 text-surface-600 rounded-lg hover:bg-surface-50 transition-colors"
-          >
-            取消
-          </button>
-          <button 
-            @click="createNewFile"
-            class="flex-1 px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors"
-          >
-            创建
-          </button>
-        </div>
-      </div>
-    </div>
   </div>
+  <el-dialog v-model="debugVisible" :close-on-click-modal="false" class="h-full overflow-auto border border-surface-200 rounded-lg p-4" style="margin-top:-1px" width="50%">
+    <ProjectContainerConfig 
+      :project="project"
+      :messages="projectMessages"
+    />
+  </el-dialog>
 </template>
 
 <style scoped>

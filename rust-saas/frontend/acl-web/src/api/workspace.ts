@@ -89,7 +89,7 @@ export interface ShareFileRequest {
   file_path: string
 }
 
-import type { Project, ProjectFile, ProjectChatMessage, CreateProjectRequest, UpdateProjectRequest } from '@/types'
+import type { Project, ProjectFile, ProjectChatMessage, CreateProjectRequest, UpdateProjectRequest, ProjectContainerConfig } from '@/types'
 
 export interface ProjectInfo {
   name: string
@@ -97,6 +97,7 @@ export interface ProjectInfo {
   created_at: string
   updated_at: string
 }
+
 
 export const workspaceService = {
   listProjects: () => api.get<Project[]>(workspaceApi, '/api/projects'),
@@ -233,4 +234,7 @@ export const workspaceService = {
       })
     })
   },
- }
+
+  getProjectContainerConfigs: (projectId: number) => api.get<ProjectContainerConfig[]>(workspaceApi, `/api/project-container-configs/${projectId}`),
+  saveProjectContainerConfigs: (projectId:number, data: ProjectContainerConfig[]) => api.post<ProjectContainerConfig[]>(workspaceApi, `/api/project-container-configs/${projectId}`, data),
+  }

@@ -269,7 +269,6 @@ table! {
         description -> Nullable<Text>,
         model_id -> Nullable<Int8>,
         agent_id -> Nullable<Int8>,
-        status -> Nullable<Int8>,
         last_accessed_at -> Timestamp,
         created_at -> Timestamp,
         updated_at -> Timestamp,
@@ -284,6 +283,8 @@ table! {
         content -> Nullable<Text>,
         created_at -> Timestamp,
         updated_at -> Timestamp,
+        directory -> Nullable<Text>,
+        state -> Int4,
     }
 }
 
@@ -297,6 +298,29 @@ table! {
     }
 }
 
+
+table!{
+    project_container_configs (id) {
+        id -> Int8,
+        project_id -> Int8,
+        project_dir -> Text,
+        published_ports -> Text,
+        volumes -> Text,
+        environment -> Text,
+        command -> Text,
+        working_dir -> Text,
+        tags -> Text,
+        container_name -> Text,
+        cpu_usage -> Text,
+        memory_usage -> Text,
+        image_name -> Text,
+        creator_id -> Int8,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+   
+
+}
 table! {
     project_summaries (id) {
         id -> Int8,

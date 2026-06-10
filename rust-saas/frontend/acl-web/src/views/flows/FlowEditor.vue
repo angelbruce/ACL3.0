@@ -72,7 +72,7 @@
   </div>
 </template>
 <script setup lang="ts">
-import { loadmodule } from '@/utils/mx';
+import { loadmodule } from '@/utils/mx.js';
 
 onMounted(async () => {
   await loadmodule();
@@ -422,7 +422,7 @@ const waitForMxGraph = (callback: () => void) => {
   if ((window as any).mxGraph) {
     callback();
   } else { 
-    setTimeout(() => waitForMxGraph(callback), 50);
+    setTimeout(() => waitForMxGraph(callback), 100);
  }
 };
 
@@ -447,10 +447,13 @@ const loadFlowData = ()=> {
 };
 
 onMounted(() => {
- waitForMxGraph(initGraph);
- loadFlowData();
+ waitForMxGraph(loadAll);
 });
 
+const loadAll = ()=> {
+  initGraph();
+  loadFlowData();
+}
 
 onUnmounted(() => {
  graph = null;

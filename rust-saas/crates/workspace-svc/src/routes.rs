@@ -5,6 +5,7 @@ use crate::handlers::*;
 use shared::middleware::auth_middleware;
 use tower_http::services::{ServeDir, ServeFile};
 
+
 pub fn create_router() -> Router {
     let root_path = env::var("WORKSPACE_ROOT").unwrap_or_else(|_| "./workspace_storage".to_string());
     let cors = CorsLayer::new()
@@ -46,6 +47,8 @@ pub fn create_router() -> Router {
         .route("/api/kanban/items/:item_id", axum::routing::delete(remove_file_from_board))
         .route("/api/kanban/subscriptions", axum::routing::get(get_subscribed_boards))
         .route("/api/kanban/boards/:board_id/files/*file_path", axum::routing::get(download_shared_file))
+        .route("/api/project-container-configs/:project_id", axum::routing::get(get_project_container_config))
+        .route("/api/project-container-configs/:project_id", axum::routing::post(save_project_container_config))
         .layer(axum::middleware::from_fn(auth_middleware))
         .nest_service("/voice", ServeDir::new(root_path))
         .layer(cors)
