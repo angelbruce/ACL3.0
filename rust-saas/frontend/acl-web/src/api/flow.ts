@@ -23,4 +23,7 @@ export const flowService = {
 
   getFlowRuntime: (id: number) =>
     api.get<{ 0: FlowRuntime; 1: FlowRuntimeNode[] }>(flowApi, `/api/flows/${id}/runtime`),
+
+  getFlowRuntimeByFlowId: (id: number) =>
+    api.get<FlowRuntime | null>(flowApi, `/api/flows/flow/${id}/runtime`),
 }

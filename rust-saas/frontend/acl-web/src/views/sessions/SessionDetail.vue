@@ -182,7 +182,7 @@ const parseMarkdown = (text: string) => {
       head = false
       body =  '<table class="flex-1 w-full wrap text-center table table-striped table-hover table-bordered table-sm table-responsive-md ">'
             + '<tr><td class="text-center font-bold border border-surface-900 px-2 py-2 bg-gray-600 text-white">' 
-            + list.join('</td><td class="text-center font-bold border border-surface-900 px-2 py-2 bg-white bg-gray-600 text-white">') + '</td></tr>'
+            + list.join('</td><td class="text-center font-bold border border-surface-900 px-2 py-2 bg-gray-600 text-white">') + '</td></tr>'
     }
     else {
       body = '<tr><td class="text-left border border-surface-900 px-2 py-2 bg-white">' 

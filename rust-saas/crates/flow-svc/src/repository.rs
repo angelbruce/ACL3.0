@@ -11,6 +11,12 @@ pub struct FlowRepository {
     pool: r2d2::Pool<ConnectionManager<PgConnection>>,
 }
 
+impl FlowRepository {
+    pub fn get_pool(&self) -> r2d2::Pool<ConnectionManager<PgConnection>> {
+        self.pool.clone()
+    }
+}
+
 impl Clone for FlowRepository {
     fn clone(&self) -> Self {
         FlowRepository {
@@ -81,6 +87,7 @@ impl FlowRepository {
         Ok(flow)
     }
 
+
     pub async fn delete_flow(&self, id: i64) -> ServiceResult<()> {
         let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
         
@@ -144,6 +151,7 @@ impl FlowRepository {
         
         Ok(runtime)
     }
+   
 
     pub async fn create_flow_runtime_nodes(&self, runtime_id: i64, flow_id: i64, nodes: Vec<FlowRuntimeNodeCreate>) -> ServiceResult<Vec<FlowRuntimeNode>> {
         let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
@@ -156,12 +164,14 @@ impl FlowRepository {
                 .values((
                     flow_runtime_nodes::flow_runtime_id.eq(runtime_id),
                     flow_runtime_nodes::flow_id.eq(flow_id),
+                    flow_runtime_nodes::flow_node_id.eq(node.flow_node_id),
                     flow_runtime_nodes::action_id.eq(node.action_id),
                     flow_runtime_nodes::action.eq(&node.action),
                     flow_runtime_nodes::prompt.eq(&node.prompt),
                     flow_runtime_nodes::status.eq(node.status.to_string()),
                     flow_runtime_nodes::next_choice.eq(&node.next_choice),
                     flow_runtime_nodes::created_at.eq(now),
+                    flow_runtime_nodes::human.eq(0),
                 ))
                 .returning(FlowRuntimeNode::as_select())
                 .get_result(&mut conn)?;
@@ -172,26 +182,48 @@ impl FlowRepository {
         Ok(result_nodes)
     }
 
-    pub async fn update_flow_runtime_node(&self, node_id: i64, status: NodeStatus) -> ServiceResult<()> {
+    pub async fn update_flow_runtime_node(&self, runtime_node_id: i64, status: NodeStatus) -> ServiceResult<()> {
         let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
         
         diesel::update(flow_runtime_nodes::table)
-            .filter(flow_runtime_nodes::id.eq(node_id))
+            .filter(flow_runtime_nodes::id.eq(runtime_node_id))
             .set(flow_runtime_nodes::status.eq(status.to_string()))
             .execute(&mut conn)?;
         
         Ok(())
     }
 
-    pub async fn update_flow_runtime_node_next_choice(&self, node_id: i64, next_choice: &str) -> ServiceResult<()> {
+    pub async fn update_flow_runtime_node_next_choice(&self, runtime_node_id: i64, next_choice: &str) -> ServiceResult<()> {
         let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
         
         diesel::update(flow_runtime_nodes::table)
-            .filter(flow_runtime_nodes::id.eq(node_id))
+            .filter(flow_runtime_nodes::id.eq(runtime_node_id))
             .set(flow_runtime_nodes::next_choice.eq(next_choice))
             .execute(&mut conn)?;
         
         Ok(())
+    }
+
+     pub async fn update_flow_runtime_node_human(&self, runtime_node_id: i64, human: i32) -> ServiceResult<()> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        
+        let _ = diesel::update(flow_runtime_nodes::table)
+            .filter(flow_runtime_nodes::id.eq(runtime_node_id))
+            .set(flow_runtime_nodes::human.eq(human))
+            .execute(&mut conn)?;
+        
+        Ok(())
+    }
+
+
+    pub async fn get_flow_runtime_node_human(&self, runtime_node_id: i64) -> ServiceResult<i32> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        
+        let human = flow_runtime_nodes::table
+            .filter(flow_runtime_nodes::id.eq(runtime_node_id))
+            .first::<FlowRuntimeNode>(&mut conn)?;
+        
+        Ok(human.human)
     }
 
     pub async fn get_flow_runtime_nodes(&self, runtime_id: i64) -> ServiceResult<Vec<FlowRuntimeNode>> {
@@ -215,9 +247,21 @@ impl FlowRepository {
         
         Ok(runtime)
     }
+
+    pub async fn update_flow_runtime_status(&self, runtime_id: i64, is_over: bool) -> ServiceResult<()> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        
+        diesel::update(flow_runtimes::table)
+            .filter(flow_runtimes::id.eq(runtime_id))
+            .set(flow_runtimes::is_over.eq(is_over))
+            .execute(&mut conn)?;
+        
+        Ok(())
+    }
 }
 
 pub struct FlowRuntimeNodeCreate {
+    pub flow_node_id: String,
     pub action_id: i64,
     pub action: String,
     pub prompt: Option<String>,

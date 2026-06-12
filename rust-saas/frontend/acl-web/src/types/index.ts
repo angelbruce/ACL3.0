@@ -128,7 +128,8 @@ export interface FlowRuntimeNode {
   prompt?: string
   status: 'Running' | 'RunningOver' | 'Stop'
   next_choice?: string
-  created_at: string
+  created_at: string,
+  human: number
 }
 
 export interface CreateFlowRequest {

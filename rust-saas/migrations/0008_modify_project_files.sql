@@ -25,3 +25,12 @@ CREATE TABLE project_container_configs (
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
 );
+
+
+ALTER TABLE flow_runtime_nodes
+    ADD COLUMN human integer DEFAULT 0;
+
+
+
+ALTER TABLE flow_runtime_nodes
+    ADD COLUMN flow_node_id text DEFAULT '';

@@ -717,15 +717,28 @@ pub struct NewFlowRuntime {
 #[diesel(table_name = crate::schema::flow_runtime_nodes)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct FlowRuntimeNode {
+    //the id of the node in the flow runtime
     pub id : i64,
+    // the id of the flow runtime, it's the instance id of the flow blueprint.
     pub flow_runtime_id: i64,
+    // the id of the flow
     pub flow_id: i64,
-    pub action_id: i64,
+    //the id of the node in the flow config.
+    pub flow_node_id: String,
+    //the action id is basicly the agent id of the node which is stands for performer.
+    pub action_id: i64, 
+    // the action value of the node stands for the users blueprint.
     pub action :String,
+    // the prompt of the agent only used for current node.
     pub prompt :Option<String>,
+    // the status of the runtime-node, it's be Running, RunningOver, Stop.
     pub status :String,
+    // the next choice of the node, it's the id of the next node in the flow config.
     pub next_choice :Option<String>,
+    // the created time of the node
     pub created_at : NaiveDateTime,
+    // need human or not , 0 means no, 1 means yes.
+    pub human : i32,
 }
 
 
@@ -762,12 +775,20 @@ impl std::fmt::Display for NodeStatus {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Vertex {
+    //the id of the vertex in the flow config
     pub id : String,
+    //the value of the vertex-node which is the users blueprint.
     pub value: String,
+    // the paths which have to be finished if the node want to continued to move to the next node.
     pub paths:Vec<String>,
     pub r#type :String,
+    //the agent id of the vertex-node, it's the id of the agent in the flow config.
     pub agent: Option<i64>,
+    //node's completion degree,only 100% or 1%.
+    //100% means need nodes point to this node all completed if want to continue to move to the next node.
+    //1% means need can move to the next node if any node node point to this node completed.
     pub degree: Option<i64>,
+    //the prompt of the agent, only for this node.
     pub prompt: Option<String>,
     pub x: i64,
     pub y: i64,

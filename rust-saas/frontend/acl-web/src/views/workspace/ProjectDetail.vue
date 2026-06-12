@@ -12,7 +12,6 @@ import { ArrowLeft, Send, Loader2, Bot, User, Wrench, Copy, Check, ChevronDown, 
 import { useWorkspaceStore, useLlmStore, useAuthStore, useAgentStore } from '@/stores'
 import { llmService, workspaceService, authService, type StreamResponse } from '@/api'
 import type { ProjectFile, LlmModel, Agent, ProjectChatMessage } from '@/types'
-import { fa } from 'element-plus/es/locales.mjs'
 import ProjectContainerConfig from '@/views/workspace/ProjectContainerConfig.vue'
 
 const route = useRoute()
@@ -723,6 +722,9 @@ let debugVisible = ref(false)
       
         <div class="flex items-center">
           <div class="flex items-center gap-2  flex-row">
+
+            <audio ref="audioRef" v-if="project && project?.purpose == 'article' && playing" controls></audio>
+
             <button class="bg-surface-50 border px-4 py-2 border-surface-200 rounded-lg hover:bg-surface-100 transition-colors text-sm text-surface-600 flex items-center gap-2">
              <LucideFolderOutput class="w-4 h-4" /> <span>导出</span>
             </button>

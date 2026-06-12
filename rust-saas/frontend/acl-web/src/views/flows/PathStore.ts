@@ -4,7 +4,7 @@ export interface NodeInfo {
     prompt: string;
     type: string;
     agent: string | null;
-    degree: string | null;
+    degree: number | 1;
     paths: string[];
     x?: number;
     y?: number;
@@ -59,7 +59,7 @@ export class PathStore {
                 prompt: vertex.prompt || '',
                 type: vertex.type || '',
                 agent: vertex.agent || null,
-                degree: vertex.degree || null,
+                degree: vertex.degree || 1,
                 paths: vertex.paths || [],
                 fromPaths:  [],
             };
@@ -105,7 +105,7 @@ export class PathStore {
                 prompt: '',
                 type: style.type(),
                 agent: style.agent() || null,
-                degree: '100',
+                degree: 1,
                 paths: [] as string[],
                 fromPaths:  [],
             };

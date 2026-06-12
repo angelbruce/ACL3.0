@@ -19,6 +19,7 @@ pub fn create_router() -> Router {
         .route("/api/flows/:id/status", axum::routing::get(get_flow_status))
         .route("/api/flows/:id/runtimes", axum::routing::get(get_flow_runtimes))
         .route("/api/flows/:id/runtime", axum::routing::get(get_flow_runtime))
+        .route("/api/flows/flow/:id/runtime", axum::routing::get(get_flow_runtime_by_flow_id))
         .route("/api/flow-runtimes/:runtime_id/nodes/:node_id/complete", axum::routing::post(complete_node))
         .layer(cors)
 }

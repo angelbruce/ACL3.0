@@ -38,6 +38,10 @@ export const useFlowStore = defineStore('flow', () => {
     }
   }
 
+  /**
+   * 获取指定流程的所有运行时
+   * @param flowId 流程ID
+   */
   const fetchRuntimes = async (flowId: number) => {
     loading.value = true
     error.value = null
@@ -51,12 +55,16 @@ export const useFlowStore = defineStore('flow', () => {
     }
   }
 
-  const fetchRuntime = async (id: number) => {
+  /**
+   * 获取指定流程的运行时
+   * @param flowId 运行时流程ID
+   */
+  const fetchRuntime = async (id: number): Promise<{ runtime: FlowRuntime; nodes: FlowRuntimeNode[] | null } | null> => {
     loading.value = true
     error.value = null
     try {
       const result = await flowService.getFlowRuntime(id)
-      currentRuntime.value = { runtime: result[0], nodes: result[1] }
+      currentRuntime.value = { runtime: result[0], nodes: result[1] || [] }
       return currentRuntime.value
     } catch (err: unknown) {
       error.value = err instanceof Error ? err.message : 'Failed to fetch runtime'
@@ -65,6 +73,22 @@ export const useFlowStore = defineStore('flow', () => {
       loading.value = false
     }
   }
+
+
+  const getFlowRuntimeByFlowId = async (flowId: number) => {
+    loading.value = true
+    error.value = null
+    try {
+      const runtime = await flowService.getFlowRuntimeByFlowId(flowId)
+      return runtime
+    } catch (err: unknown) {
+      error.value = err instanceof Error ? err.message : 'Failed to fetch runtime'
+      throw err
+    } finally {
+      loading.value = false
+    }
+  }
+
 
   const createFlow = async (data: CreateFlowRequest) => {
     loading.value = true
@@ -159,6 +183,7 @@ export const useFlowStore = defineStore('flow', () => {
     currentRuntime,
     loading,
     error,
+    getFlowRuntimeByFlowId,
     fetchFlows,
     fetchFlow,
     fetchRuntimes,

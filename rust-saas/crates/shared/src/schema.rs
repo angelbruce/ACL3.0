@@ -64,12 +64,14 @@ table! {
         id -> Int8,
         flow_runtime_id -> Int8,
         flow_id -> Int8,
+        flow_node_id -> Text,
         action_id -> Int8,
         action -> Text,
         prompt -> Nullable<Text>,
         status -> Text,
         next_choice -> Nullable<Text>,
         created_at -> Timestamp,
+        human -> Int4,
     }
 }
 

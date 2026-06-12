@@ -6,35 +6,12 @@ use shared::errors::{ServiceError, ServiceResult};
 use shared::models::{Flow, FlowRuntime, FlowRuntimeNode, CreateFlowRequest};
 use crate::repository::FlowRepository;
 use crate::state_machine::FlowStateMachine;
-use crate::executor::FlowExecutor;
+use crate::executor::{FlowExecutor};
+use crate::flow::EXECUTOR_MANAGER;
 // use once_cell::sync::Lazy;
 
-pub struct ExecutorManager {
-    executors: HashMap<i64, Arc<FlowExecutor>>,
-}
 
-impl ExecutorManager {
-    pub fn new() -> Self {
-        ExecutorManager {
-            executors: HashMap::new(),
-        }
-    }
 
-    pub fn get(&self, flow_id: i64) -> Option<Arc<FlowExecutor>> {
-        self.executors.get(&flow_id).cloned()
-    }
-
-    pub fn insert(&mut self, flow_id: i64, executor: Arc<FlowExecutor>) {
-        self.executors.insert(flow_id, executor);
-    }
-
-    pub fn remove(&mut self, flow_id: i64) {
-        self.executors.remove(&flow_id);
-    }
-}
-
-pub static EXECUTOR_MANAGER: once_cell::sync::Lazy<Arc<RwLock<ExecutorManager>>> = 
-    once_cell::sync::Lazy::new(|| Arc::new(RwLock::new(ExecutorManager::new())));
 
 pub async fn get_flows() -> ServiceResult<Json<Vec<Flow>>> {
     let repo = FlowRepository::new();
@@ -71,21 +48,19 @@ pub async fn delete_flow(Path(id): Path<i64>) -> ServiceResult<Json<()>> {
 }
 
 pub async fn start_flow(Path(id): Path<i64>) -> ServiceResult<Json<FlowRuntime>> {
+    let repo = FlowRepository::new();
+    let state_machine = FlowStateMachine::new(repo.clone());
+    let runtime = state_machine.start_flow(id).await?;
     {
         let manager = EXECUTOR_MANAGER.read().await;
         if let Some(executor) = manager.get(id) {
             if executor.is_running().await {
-                return Err(ServiceError::Conflict("Flow is already running".to_string()));
+                return  Ok(Json(runtime))
             }
         }
     }
-
-    let repo = FlowRepository::new();
-    let state_machine = FlowStateMachine::new(repo.clone());
-    let runtime = state_machine.start_flow(id).await?;
     
-    let executor = Arc::new(FlowExecutor::new(id, runtime.id));
-    
+    let executor = Arc::new(FlowExecutor::new(id, runtime.id, repo.clone()));
     {
         let mut manager = EXECUTOR_MANAGER.write().await;
         manager.insert(id, executor.clone());
@@ -93,6 +68,13 @@ pub async fn start_flow(Path(id): Path<i64>) -> ServiceResult<Json<FlowRuntime>>
     
     executor.start().await?;
     
+    Ok(Json(runtime))
+}
+
+
+pub async fn get_flow_runtime_by_flow_id(Path(id):Path<i64>) -> ServiceResult<Json<Option<FlowRuntime>>> {
+    let repo = FlowRepository::new();
+    let runtime = repo.get_running_flow_runtime(id).await?;
     Ok(Json(runtime))
 }
 
@@ -110,25 +92,22 @@ pub async fn get_flow_runtime(Path(id): Path<i64>) -> ServiceResult<Json<(FlowRu
 
 pub async fn stop_flow(Path(id): Path<i64>) -> ServiceResult<Json<FlowRuntime>> {
     let repo = FlowRepository::new();
-    let flow = repo.get_flow(id).await?;
+    let (runtime, nodes) = repo.get_flow_runtime_with_nodes(id).await?;
     
-    if let Some(runtime) = repo.get_running_flow_runtime(id).await? {
-        {
-            let manager = EXECUTOR_MANAGER.read().await;
-            if let Some(executor) = manager.get(id) {
-                executor.stop().await?;
-            }
+    {
+        let manager = EXECUTOR_MANAGER.read().await;
+        if let Some(executor) = manager.get(id) {
+            executor.stop().await?;
         }
+    }
+    let runtime = repo.stop_flow_runtime(runtime.id).await?;
         
-        let runtime = repo.stop_flow_runtime(runtime.id).await?;
-        
+    {
         let mut manager = EXECUTOR_MANAGER.write().await;
         manager.remove(id);
-        
-        Ok(Json(runtime))
-    } else {
-        Err(ServiceError::NotFound)
     }
+    
+    Ok(Json(runtime))
 }
 
 pub async fn get_flow_status(Path(id): Path<i64>) -> ServiceResult<Json<FlowStatusResponse>> {

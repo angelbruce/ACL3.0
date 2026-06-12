@@ -96,7 +96,7 @@ var current = ref<NodeInfoEx>({
   value:'current',
   prompt:'',
   agent:null,
-  degree:'100',
+  degree:1,
   paths:[],
   x:0,
   y:0,
@@ -237,7 +237,7 @@ var nodeStart: any|null  = null
 
 const onShowProps = ()=> {
   var selection = graph.getSelectionCells();
-  var empty = {id: '', value: '', prompt: '', agent: null, degree: '100', paths: [], type: '',fromPaths:[]};
+  var empty = {id: '', value: '', prompt: '', agent: null, degree: 1, paths: [], type: '',fromPaths:[]};
     if(selection.length === 0 || !selection[0].vertex) {
       console.log(1);
       current.value = empty;
@@ -383,13 +383,15 @@ const exportFlow = (): FlowData => {
       var node = pathStore.getNodeInfo(id);
       if(!node) continue;
 
+      if(node.degree)  node.degree = parseInt(node.degree+"");
+
       vertices.push({
         id:id,
         value: cell.value || '',
         type:  node.type,
         prompt: node.prompt || '',
         agent: node.agent,
-        degree: node.degree || null,
+        degree: node.degree || 1,
         paths: node.paths || [],
         x: geometry?.x || 0,
         y: geometry?.y || 0,
