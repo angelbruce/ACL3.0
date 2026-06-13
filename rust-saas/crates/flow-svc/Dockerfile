@@ -7,10 +7,12 @@ WORKDIR /app
 COPY Cargo.toml Cargo.toml
 COPY crates/shared/Cargo.toml crates/shared/Cargo.toml
 COPY crates/flow-svc/Cargo.toml crates/flow-svc/Cargo.toml
+COPY crates/extmacros/Cargo.toml crates/extmacros/Cargo.toml
 
 # 复制源代码
 COPY crates/shared/src crates/shared/src
 COPY crates/flow-svc/src crates/flow-svc/src
+COPY crates/extmacros/src crates/extmacros/src  
 
 # 构建 flow-svc
 RUN cd crates/flow-svc && cargo build --release

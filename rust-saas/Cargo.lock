@@ -490,6 +490,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "extmacros"
+version = "0.1.0"
+dependencies = [
+ "dsl_auto_type",
+ "proc-macro2",
+ "quote",
+ "shared",
+ "syn",
+]
+
+[[package]]
 name = "fastrand"
 version = "2.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -509,6 +520,7 @@ dependencies = [
  "chrono",
  "diesel",
  "dotenv",
+ "extmacros",
  "futures",
  "once_cell",
  "openssl-sys",

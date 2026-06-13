@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/shared",
+    "crates/extmacros",
     "crates/flow-svc",
     "crates/llm-svc",
     "crates/mcp-svc",
@@ -10,8 +11,8 @@ members = [
     "crates/agent-svc",
     "crates/session-svc",
     "crates/workspace-svc",
-
 ]
+
 
 [workspace.package]
 version = "0.1.0"

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { Plus, Building2, Trash2, Edit2, Loader2, FolderOpen } from 'lucide-vue-next'
 import { useAdminStore } from '@/stores'
 import type { Department } from '@/types'
@@ -103,10 +103,46 @@ const getChildren = (parentId: number | null) => {
 defineProps<{
   departments?: Department[]
 }>()
+
+
+interface DepartmentTree {
+  id: number
+  name: string
+  parent_id: number | null
+  data: Department
+  children: DepartmentTree[]
+}
+
+const departmentTree = computed(() => {
+    let tree: DepartmentTree[] = []
+    tree = getChildrenTree(null)
+    return tree
+});
+
+const getChildrenTree = (parentId: number | null): DepartmentTree[] => {
+  return adminStore.departments.filter(x => (parentId === null && x.parent_id === null)||( parentId !== null && x.parent_id === parentId)).map(x => ({
+    id: x.id,
+    name: x.name,
+    parent_id: parentId,
+    data: x,
+    children: getChildrenTree(x.id),
+  }))
+}
+
+const defaultProps = {
+  children: 'children',
+  label: 'name',
+}
+const handleCheckChange = (checkedKeys: number[], node: DepartmentTree) => {
+  console.log(checkedKeys, node)
+}
+
+
+
 </script>
 
 <template>
-  <div class="p-6">
+  <div class="p-6 h-full w-full overflow-auto">
     <div class="page-header">
       <div>
         <h1 class="page-title">部门管理</h1>
@@ -122,7 +158,7 @@ defineProps<{
       <Loader2 class="w-8 h-8 animate-spin text-primary-500" />
     </div>
 
-    <div v-else-if="adminStore.departments.length === 0" class="card p-12 text-center">
+    <div v-else-if="adminStore.departments.length === 0" class="card p-12 text-center h-full w-full overflow-auto">
       <div class="w-16 h-16 mx-auto rounded-2xl bg-primary-50 border border-primary-100 flex items-center justify-center mb-4">
         <FolderOpen class="w-8 h-8 text-primary-400" />
       </div>
@@ -133,8 +169,23 @@ defineProps<{
       </button>
     </div>
 
-    <div v-else class="space-y-4 max-w-2xl">
-      <template v-for="department in getChildren(null)" :key="department.id">
+    <div v-else class="space-y-4 h-full w-full overflow-auto  px-4 py-2">
+      <el-tree
+        class="w-full h-full px-14 py-12 border border-surface-200 "
+        :data="departmentTree"
+        :props="defaultProps"
+        @check-change="handleCheckChange"
+        empty-text="暂无部门"
+        check-strictly
+        show-checkbox
+        default-expand-all
+        highlight-current
+      >
+      <template #default="{node,data}">
+        <Building2 class="w-5 h-5 text-cyan-500 mr-2 ml-2" />{{ data.name }}
+      </template>
+    </el-tree>
+      <!-- <template v-for="department in getChildren(null)" :key="department.id">
         <div class="card p-4 group">
           <div class="flex items-start justify-between">
             <div class="flex items-center gap-3">
@@ -165,7 +216,6 @@ defineProps<{
             </div>
           </div>
 
-          <!-- 递归子部门 -->
           <div v-if="getChildren(department.id).length > 0" class="mt-3 pl-4 border-l-2 border-surface-100">
             <template v-for="child in getChildren(department.id)" :key="child.id">
               <div class="card p-4 group mt-4">
@@ -198,7 +248,6 @@ defineProps<{
                   </div>
                 </div>
 
-                <!-- 第三层子部门 -->
                 <div v-if="getChildren(child.id).length > 0" class="mt-3 pl-4 border-l-2 border-surface-100">
                   <template v-for="grandchild in getChildren(child.id)" :key="grandchild.id">
                     <div class="card p-4 group mt-4">
@@ -237,7 +286,7 @@ defineProps<{
             </template>
           </div>
         </div>
-      </template>
+      </template> -->
     </div>
 
     <!-- Form dialog -->

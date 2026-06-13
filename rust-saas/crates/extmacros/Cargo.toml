@@ -1,0 +1,33 @@
+[package]
+name = "extmacros"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "extmacros"
+path = "src/lib.rs"
+proc-macro = true
+proc_macro_derive = true
+
+[dependencies]
+shared = { path = "../shared" }
+
+[dependencies.proc-macro2]
+version = "1.0.27"
+
+[dependencies.dsl_auto_type]
+version = "0.2"
+
+[dependencies.quote]
+version = "1.0.9"
+
+[dependencies.syn]
+version = "2.0"
+features = [
+    "derive",
+    "fold",
+    "full",
+    "visit-mut",
+]
+
+

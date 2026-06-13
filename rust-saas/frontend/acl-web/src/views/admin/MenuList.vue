@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, computed } from 'vue'
 import { Plus, Menu, Trash2, Edit2, Loader2, ChevronRight } from 'lucide-vue-next'
 import { useAdminStore } from '@/stores'
 import type { Menu as MenuType } from '@/types'
@@ -101,11 +101,56 @@ const getParentName = (parentId: number | undefined) => {
 const getChildren = (parentId: number | null) => {
   return adminStore.menus.filter(m => m.parent_id === parentId).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
 }
+
+
+interface MenuTree {
+  id: number
+  name: string
+  path: string
+  parent_id: number | null
+  icon: string
+  sort_order: number
+  children: MenuTree[]
+  data: MenuType
+}
+
+
+const menuTree = computed(() => {
+    let tree: MenuTree[] = []
+    tree = getChildrenTree(null)
+    return tree
+});
+
+const getChildrenTree = (parentId: number | null): MenuTree[] => {
+  return adminStore.menus.filter(x => (parentId === null && x.parent_id === null)||( parentId !== null && x.parent_id === parentId))
+  .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
+  .map(x => ({
+    id: x.id,
+    name: x.name,
+    parent_id: parentId,
+    path: x.path || '',
+    icon: x.icon || '',
+    sort_order: x.sort_order || 0,
+    children: getChildrenTree(x.id),
+    data: x,
+  }))
+}
+
+
+const defaultProps = {
+  children: 'children',
+  label: 'name',
+}
+const handleCheckChange = (checkedKeys: number[], node: MenuTree) => {
+  console.log(checkedKeys, node)
+}
+
+
 </script>
 
 <template>
-  <div class="p-6">
-    <div class="page-header">
+  <div class="px-8 w-full h-full">
+    <div class="page-header w-full ">
       <div>
         <h1 class="page-title">菜单管理</h1>
         <p class="page-subtitle">menu management</p>
@@ -116,11 +161,11 @@ const getChildren = (parentId: number | null) => {
       </button>
     </div>
 
-    <div v-if="adminStore.loading" class="flex items-center justify-center py-12">
+    <div v-if="adminStore.loading" class="flex items-center justify-center py-12  w-full h-full">
       <Loader2 class="w-8 h-8 animate-spin text-primary-500" />
     </div>
 
-    <div v-else-if="adminStore.menus.length === 0" class="card p-12 text-center">
+    <div v-else-if="adminStore.menus.length === 0" class="card p-12 text-center  w-full h-full">
       <div class="w-16 h-16 mx-auto rounded-2xl bg-primary-50 border border-primary-100 flex items-center justify-center mb-4">
         <Menu class="w-8 h-8 text-primary-400" />
       </div>
@@ -131,8 +176,25 @@ const getChildren = (parentId: number | null) => {
       </button>
     </div>
 
-    <div v-else class="space-y-4 max-w-2xl">
-      <template v-for="menu in getChildren(null)" :key="menu.id">
+    <div v-else class="space-y-4  w-full h-full">
+      <el-tree
+        class="w-full h-full px-14 py-12 border border-surface-200 "
+        :data="menuTree"
+        :props="defaultProps"
+        @check-change="handleCheckChange"
+        empty-text="暂无菜单"
+        check-strictly
+        show-checkbox
+        default-expand-all
+        highlight-current
+      >
+      <template #default="{node,data}">
+         <Menu class="w-5 h-5 text-emerald-500" />{{ data.name }}
+                
+      </template>
+    </el-tree>
+
+      <!-- <template v-for="menu in getChildren(null)" :key="menu.id">
         <div class="card p-4 group">
           <div class="flex items-start justify-between">
             <div class="flex items-center gap-3">
@@ -159,7 +221,6 @@ const getChildren = (parentId: number | null) => {
             </div>
           </div>
 
-          <!-- 第一层子菜单 -->
           <div v-if="getChildren(menu.id).length > 0" class="mt-3 pl-4 border-l-2 border-surface-100">
             <template v-for="child in getChildren(menu.id)" :key="child.id">
               <div class="card p-4 group mt-4">
@@ -188,7 +249,6 @@ const getChildren = (parentId: number | null) => {
                   </div>
                 </div>
 
-                <!-- 第二层子菜单 -->
                 <div v-if="getChildren(child.id).length > 0" class="mt-3 pl-4 border-l-2 border-surface-100">
                   <template v-for="grandchild in getChildren(child.id)" :key="grandchild.id">
                     <div class="card p-4 group mt-4">
@@ -220,7 +280,7 @@ const getChildren = (parentId: number | null) => {
             </template>
           </div>
         </div>
-      </template>
+      </template> -->
     </div>
 
     <!-- Form dialog -->

@@ -14,6 +14,7 @@ RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debia
 # 复制 Cargo.toml 并构建依赖缓存层
 COPY Cargo.toml .
 COPY crates/shared/Cargo.toml crates/shared/
+COPY crates/extmacros/Cargo.toml crates/extmacros/
 COPY crates/mcp-svc/Cargo.toml crates/mcp-svc/
 COPY crates/llm-svc/Cargo.toml crates/llm-svc/
 COPY crates/agent-svc/Cargo.toml crates/agent-svc/
@@ -24,8 +25,9 @@ COPY crates/admin-svc/Cargo.toml crates/admin-svc/
 COPY crates/workspace-svc/Cargo.toml crates/workspace-svc/
 
 # 创建一个空的 main.rs 来触发依赖下载和编译
-RUN mkdir -p crates/shared/src crates/mcp-svc/src crates/llm-svc/src crates/agent-svc/src crates/session-svc/src crates/flow-svc/src crates/auth-svc/src crates/admin-svc/src crates/workspace-svc/src && \
+RUN mkdir -p crates/shared/src crates/mcp-svc/src crates/llm-svc/src crates/agent-svc/src crates/session-svc/src crates/flow-svc/src crates/auth-svc/src crates/admin-svc/src crates/workspace-svc/src crates/extmacros/src && \
     echo "fn main() {}" > crates/shared/src/lib.rs && \
+    echo "fn main() {}" > crates/extmacros/src/lib.rs && \
     echo "fn main() {}" > crates/mcp-svc/src/main.rs && \
     echo "fn main() {}" > crates/llm-svc/src/main.rs && \
     echo "fn main() {}" > crates/agent-svc/src/main.rs && \
@@ -35,8 +37,10 @@ RUN mkdir -p crates/shared/src crates/mcp-svc/src crates/llm-svc/src crates/agen
     echo "fn main() {}" > crates/admin-svc/src/main.rs && \
     echo "fn main() {}" > crates/workspace-svc/src/main.rs
 
+
+
 # 构建依赖（这会缓存所有 crates.io 依赖）
 RUN cargo build --release --all
 
 # 清理临时文件，但保留依赖缓存
-RUN rm -rf crates/*/src
+RUN rm -rf crates/*/src 
