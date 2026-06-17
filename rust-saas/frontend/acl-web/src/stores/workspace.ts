@@ -254,6 +254,19 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
+  const startContainer = async (projectId: number) => {
+    loading.value = true
+    error.value = null
+    try {
+      await workspaceService.startContainer(projectId)
+    } catch (err: unknown) {
+      error.value = err instanceof Error ? err.message : 'Failed to start container'
+      throw err
+    } finally {
+      loading.value = false
+    }
+  }
+
 
   return {
     projects,

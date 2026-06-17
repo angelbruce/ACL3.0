@@ -85,8 +85,12 @@ impl McpSseClient {
             }
         });
 
+        println!("Request body: {:?}", request_body);
+        println!("self.server.url: {:?}", self.server.url);
+
         let response = self.client
             .post(&self.server.url)
+            // .header("Content-Type", "application/event-stream")
             .json(&request_body)
             .send()
             .await
@@ -122,10 +126,20 @@ impl McpSseClient {
             .await
             .map_err(|e| ServiceError::McpError(format!("Failed to connect to MCP server: {}", e)))?;
 
-        let response_json: Value = response
-            .json()
-            .await
-            .map_err(|e| ServiceError::McpError(format!("Failed to parse response: {}", e)))?;
+            println!("Response status: {:?}", response.status());
+            let bytes = response.bytes().await.map_err(|e| ServiceError::McpError(format!("Failed to read response: {}", e)))?;
+            println!("1");
+            let response_text = String::from_utf8_lossy(&bytes);
+        
+        println!("Raw MCP server response: {}", response_text);
+        let response_json = parse_sse_response(&response_text)?;
+
+        println!("Parsed MCP response: {}", response_json);
+
+        // let response_json: Value = response
+        //     .json()
+        //     .await
+        //     .map_err(|e| ServiceError::McpError(format!("Failed to parse response: {}", e)))?;
 
         if let Some(error) = response_json.get("error") {
             return Err(ServiceError::McpError(format!("MCP error: {}", error)));
@@ -150,9 +164,37 @@ impl McpSseClient {
             "params": {}
         });
 
+        let headers = self.server.headers.clone();
+        let content_type = match headers {
+            Some(headers) => {
+                let obj = headers.as_object();
+                match obj {
+                    Some(obj) => {
+                        let content_type = obj.get("Content-Type").cloned();
+                        if let Some(data) = content_type {
+                            data.to_string()
+                        } else {
+                        "".to_string()
+                        }
+                    }
+                    None => {
+                        "".to_string()
+                    }
+                }
+                
+            }
+            None => {
+                "".to_string()
+            }
+        };
+
+
+        println!("Content-Type: {:?}", content_type);
+
         let response = self.client
             .post(&self.server.url)
             .json(&request_body)
+            .header("Content-Type", &content_type)
             .header("Accept", "*/*")
             .send()
             .await

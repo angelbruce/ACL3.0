@@ -500,6 +500,13 @@ pub async fn save_project_container_config(
     Ok(Json(config))
 }
 
+pub async fn start_container(
+    Extension(claims): Extension<Claims>,
+    Path(project_id): Path<i64>,
+) -> ServiceResult<Json<HashMap<String, String>>> {
+    //todo: 实现启动容器的逻辑
+    Ok(Json(HashMap::from([("message".to_string(), "Container started successfully".to_string())])))
+}
 
 
 //暂时不考虑越权问题 横向与纵向都不考虑。

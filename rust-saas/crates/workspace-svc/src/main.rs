@@ -9,6 +9,7 @@ mod routes;
 mod handlers;
 mod repository;
 mod voice;
+mod container;
 
 #[tokio::main]
 async fn main() {

@@ -24,8 +24,12 @@ onMounted(() => {
     if (props.project && props.project.id) {
         workspaceStore.getProjectContainerConfigs(props.project.id).then((data: ProjectContainerConfig[]) => {
             data = data || []
+            data.forEach(x=>{
+                x.image_name =  'app-debug-base:latest'
+            })
             let compose = data.filter(x=>x.container_name==='docker-compose.yml') || []
             let configs = data.filter(x=>x.container_name!=='docker-compose.yml') || []
+
             if(compose.length > 0) dockerCompose.value = compose[0].environment || ''
             containerConfigs.value = configs || []
             if(containerConfigs.value.length > 0){
@@ -65,7 +69,7 @@ const fetchBasicInfo = () => {
             role: 'user',
             project_id: props.project.id,
             content: '代码要进入到docker环境下进行编译调试，如实对所有的程序代码进行筛选，获取编译调试程序所需要容器的所有相关信息，组织成jsons以及docker-compose.yml，输出内容没有先后次序约束:\n'
-                +'a) 相关信息包括：端口、卷（目录）、网络信息、docker启动的命令、docker环境变量、工作目录、最低内存、最低cpu占用以及容器镜像，并**严格按照如下格式返回**，其中JSONs的SCHEMA格式为：'
+                +'a) 相关信息包括：端口、卷（目录）、网络信息、程序调试启动的命令、docker环境变量、工作目录、最低内存、最低cpu占，并**严格按照如下格式返回**，其中JSONs的SCHEMA格式为：'
                 + '```jsons [{"published_ports":string,"volumes":string,"container_name":string,"environment":string,"command":string,"tags":string,"working_dir":string,"memory_usage":string,"cpu_usage":string,"image_name":string}]```'
                 +'b) docker-compose.yml，必须是将以上收集的容器信息运行起来的所有内容，并**严格**按照yaml的格式进行书写，输出格式为：```yaml  <YAML内容>```。'
                 ,
@@ -256,12 +260,19 @@ const getString = (data: any) => {
     return s; 
 }
 
+
+const startContainer = () => {
+    workspaceStore.startContainer(props.project.id)
+}
+
+
+
 </script>
 <template class="flex flex-col gap-2">
     <div class="flex justify-start items-left my-2">
         <el-button @click="fetchBasicInfo()" :disabled="isLlmRunning" type="primary">提取信息</el-button>
         <el-button @click="saveContainerConfig()" type="info" v-if="containerConfigs.length > 0">更新配置</el-button>
-        <el-button type="primary" v-if="containerConfigs.length > 0">启动</el-button>
+        <el-button type="primary" v-if="containerConfigs.length > 0" @click="startContainer()">启动</el-button>
         <el-button type="warning" v-if="containerConfigs.length > 0">重新启动</el-button>
         <el-button type="danger" v-if="containerConfigs.length > 0">关闭容器</el-button>
     </div>
@@ -357,23 +368,10 @@ const getString = (data: any) => {
                                         <input type="text" placeholder="容器CPU，单位核数" v-model="containerConfig.cpu_usage"
                                             class="w-full px-3 py-2 bg-surface-100 border border-surface-200 rounded-lg  text-sm text-surface-600" />
                                     </el-form-item>
-                                    <!-- <el-form-item label="容器网络" prop="network">
-                                        <input type="text" placeholder="容器网络"
-                                            class="w-full px-3 py-2 bg-surface-100 border border-surface-200 rounded-lg  text-sm text-surface-600" />
-                                    </el-form-item> -->
-                                    <!-- <el-form-item label="容器挂载" prop="mount">
-                                        <input type="text" placeholder="容器挂载，多个挂载用逗号隔开"
-                                            class="w-full px-3 py-2 bg-surface-100 border border-surface-200 rounded-lg  text-sm text-surface-600" />
-                                    </el-form-item> -->
-                                    <!-- <el-form-item label="容器类型" prop="containerType">
-                                        <el-radio-group class="flex items-center gap-2">
-                                            <span>容器类型：</span>
-                                            <el-radio label="docker">docker</el-radio>
-                                            <el-radio label="podman">Podman</el-radio>
-                                        </el-radio-group>
-                                    </el-form-item> -->
+                                    
                                     <el-form-item label="容器镜像" prop="image">
                                         <input type="text" placeholder="容器镜像"
+                                            readonly
                                             v-model="containerConfig.image_name"
                                             class="w-full px-3 py-2 bg-surface-100 border border-surface-200 rounded-lg  text-sm text-surface-600" />
                                     </el-form-item>

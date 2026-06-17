@@ -237,4 +237,5 @@ export const workspaceService = {
 
   getProjectContainerConfigs: (projectId: number) => api.get<ProjectContainerConfig[]>(workspaceApi, `/api/project-container-configs/${projectId}`),
   saveProjectContainerConfigs: (projectId:number, data: ProjectContainerConfig[]) => api.post<ProjectContainerConfig[]>(workspaceApi, `/api/project-container-configs/${projectId}`, data),
+  startContainer: (projectId: number) => api.post<{ message: string }>(workspaceApi, `/api/project-container-configs/${projectId}/start`),
   }

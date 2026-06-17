@@ -161,15 +161,34 @@ services:
       dockerfile: ./crates/workspace-svc/Dockerfile
     container_name: acl-workspace-svc
     ports:
-      - "8087:8087"
+      - "8087:8080"
     environment:
-      - PORT=8087
+      - PORT=8080
       - DATABASE_URL=postgres://admin:password@postgres:5432/acl_db
       - REDIS_URL=redis://redis:6379/0
       - JWT_SECRET=your-256-bit-secret-key-here-change-in-production
       - WORKSPACE_ROOT=/workspace_storage
     volumes:
       - workspace_storage:/workspace_storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+
+
+  mcp-provider-svc:
+    build:
+      context: .
+      dockerfile: ./crates/mcp-provider-svc/Dockerfile
+    container_name: acl-mcp-provider-svc
+    ports:
+      - "8088:8088"
+    environment:
+      - PORT=8088
+      - DATABASE_URL=postgres://admin:password@postgres:5432/acl_db
+      - REDIS_URL=redis://redis:6379/0
     depends_on:
       postgres:
         condition: service_healthy

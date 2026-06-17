@@ -16,6 +16,7 @@ COPY Cargo.toml .
 COPY crates/shared/Cargo.toml crates/shared/
 COPY crates/extmacros/Cargo.toml crates/extmacros/
 COPY crates/mcp-svc/Cargo.toml crates/mcp-svc/
+COPY crates/mcp-provider-svc/Cargo.toml crates/mcp-provider-svc/
 COPY crates/llm-svc/Cargo.toml crates/llm-svc/
 COPY crates/agent-svc/Cargo.toml crates/agent-svc/
 COPY crates/session-svc/Cargo.toml crates/session-svc/
@@ -25,9 +26,10 @@ COPY crates/admin-svc/Cargo.toml crates/admin-svc/
 COPY crates/workspace-svc/Cargo.toml crates/workspace-svc/
 
 # 创建一个空的 main.rs 来触发依赖下载和编译
-RUN mkdir -p crates/shared/src crates/mcp-svc/src crates/llm-svc/src crates/agent-svc/src crates/session-svc/src crates/flow-svc/src crates/auth-svc/src crates/admin-svc/src crates/workspace-svc/src crates/extmacros/src && \
+RUN mkdir -p crates/shared/src crates/mcp-provider-svc/src crates/mcp-svc/src crates/llm-svc/src crates/agent-svc/src crates/session-svc/src crates/flow-svc/src crates/auth-svc/src crates/admin-svc/src crates/workspace-svc/src crates/extmacros/src && \
     echo "fn main() {}" > crates/shared/src/lib.rs && \
     echo "fn main() {}" > crates/extmacros/src/lib.rs && \
+    echo "fn main() {}" > crates/mcp-provider-svc/src/main.rs && \
     echo "fn main() {}" > crates/mcp-svc/src/main.rs && \
     echo "fn main() {}" > crates/llm-svc/src/main.rs && \
     echo "fn main() {}" > crates/agent-svc/src/main.rs && \

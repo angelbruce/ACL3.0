@@ -49,6 +49,7 @@ pub fn create_router() -> Router {
         .route("/api/kanban/boards/:board_id/files/*file_path", axum::routing::get(download_shared_file))
         .route("/api/project-container-configs/:project_id", axum::routing::get(get_project_container_config))
         .route("/api/project-container-configs/:project_id", axum::routing::post(save_project_container_config))
+        .route("/api/project-container-configs/:project_id/start", axum::routing::post(start_container))
         .layer(axum::middleware::from_fn(auth_middleware))
         .nest_service("/voice", ServeDir::new(root_path))
         .layer(cors)

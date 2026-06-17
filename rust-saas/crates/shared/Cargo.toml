@@ -11,7 +11,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 thiserror = "1"
 diesel = { version = "2", features = ["postgres", "r2d2", "chrono", "serde_json"] }
 pq-sys = { version = "0.6", features = ["bundled"] }
-openssl-sys = { version = "0.9.100", features = ["vendored"] }
+openssl-sys = { version = "0.9.116", features = ["vendored"] }
 jsonwebtoken = "9"
 axum = "0.7"
 http = "1"
