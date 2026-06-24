@@ -170,6 +170,9 @@ services:
       - WORKSPACE_ROOT=/workspace_storage
     volumes:
       - workspace_storage:/workspace_storage
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /debug:/debug
+    privileged: true
     depends_on:
       postgres:
         condition: service_healthy

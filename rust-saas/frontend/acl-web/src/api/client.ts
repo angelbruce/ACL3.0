@@ -43,7 +43,7 @@ const createApiClient = (baseURL: string, headers: Record<string, string> | null
   }
   const client = axios.create({
     baseURL,
-    timeout: 30000,
+    timeout: 900000,
     headers: headers,
   })
 
@@ -51,7 +51,6 @@ const createApiClient = (baseURL: string, headers: Record<string, string> | null
   client.interceptors.request.use(
     (config: InternalAxiosRequestConfig) => {
       const token = localStorage.getItem('access_token')
-      console.log(token)
       if (token && config.headers) {
         config.headers.Authorization = `Bearer ${token}`
       }

@@ -90,19 +90,7 @@ impl Article {
         }
     }
 
-    // pub async fn get_voice(user_id:i64,project_id: i64,article_id: i64,voice_type: String, voice_seed: i64) -> Result<Vec<u8>, ServiceError> {
-    //     println!("10");
-    //     let voice_path = Article::get_voice_path(user_id, project_id, article_id, voice_type, voice_seed).await;
-    //     println!("11");
-    //     println!("{}", voice_path);
-    //     let mut file = File::open(&voice_path).map_err(|e| ServiceError::BadRequest(e.to_string()))?;
-    //     println!("12");
-    //     let mut buf = Vec::new();
-    //     println!("13");
-    //     file.read_to_end(&mut buf).map_err(|e| ServiceError::BadRequest(e.to_string()))?;
-    //     println!("14");
-    //     Ok(buf)
-    // }
+ 
 
     pub async fn get_voice_path (user_id: i64, project_id: i64, article_id: i64, voice_type: String, voice_seed: i64) -> ServiceResult<String> {
         let root_path = env::var("WORKSPACE_ROOT").unwrap_or_else(|_| "./workspace_storage".to_string());
@@ -116,10 +104,8 @@ impl Article {
     }
 
     pub async fn create_voice(article : Article) -> Result<bool, ServiceError> {
-        println!("0");
         let client = Client::new();
         let url = "http://192.168.0.108:8090/voice/make";
-        println!("1");
         let resp = client
             .post(url)
             .header("Content-Type", "application/json")
@@ -129,12 +115,9 @@ impl Article {
             .map_err(|e| ServiceError::BadRequest(e.to_string()))
             ?;
         
-        println!("2");
         let body = resp.text().await.map_err(|e| ServiceError::BadRequest(e.to_string()))?;
 
-        println!("3");
         let resp: VoiceResponse = serde_json::from_str(&body).map_err(|e| ServiceError::BadRequest(e.to_string()))?;
-        println!("4");
         if resp.success {
             let data = resp.data.unwrap();
             let buffer = data.buffer;
@@ -144,13 +127,11 @@ impl Article {
             let mut file = fs::File::create(file_path).map_err(|e| ServiceError::BadRequest(e.to_string()))?;
             file.write_all(&content).map_err(|e| ServiceError::BadRequest(e.to_string()))?;
             file.flush().map_err(|e| ServiceError::BadRequest(e.to_string()))?;   
-            println!("ok");
             return Ok(true)
         } else {
             return Ok(false)
         }
 
-        println!("6");
     }
 }
    

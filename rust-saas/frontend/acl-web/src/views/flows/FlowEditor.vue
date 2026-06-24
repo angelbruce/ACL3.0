@@ -424,7 +424,7 @@ const waitForMxGraph = (callback: () => void) => {
   if ((window as any).mxGraph) {
     callback();
   } else { 
-    setTimeout(() => waitForMxGraph(callback), 300);
+    setTimeout(() => waitForMxGraph(callback), 1000);
  }
 };
 

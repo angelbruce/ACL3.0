@@ -10,6 +10,8 @@ mod handlers;
 mod repository;
 mod voice;
 mod container;
+mod llm_client;
+mod model;
 
 #[tokio::main]
 async fn main() {

@@ -128,7 +128,6 @@ impl McpSseClient {
 
             println!("Response status: {:?}", response.status());
             let bytes = response.bytes().await.map_err(|e| ServiceError::McpError(format!("Failed to read response: {}", e)))?;
-            println!("1");
             let response_text = String::from_utf8_lossy(&bytes);
         
         println!("Raw MCP server response: {}", response_text);
@@ -136,10 +135,6 @@ impl McpSseClient {
 
         println!("Parsed MCP response: {}", response_json);
 
-        // let response_json: Value = response
-        //     .json()
-        //     .await
-        //     .map_err(|e| ServiceError::McpError(format!("Failed to parse response: {}", e)))?;
 
         if let Some(error) = response_json.get("error") {
             return Err(ServiceError::McpError(format!("MCP error: {}", error)));

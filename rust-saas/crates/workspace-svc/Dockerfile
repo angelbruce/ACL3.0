@@ -13,6 +13,13 @@ RUN cd crates/workspace-svc && cargo build --release
 # 使用运行时基础镜像
 FROM rust-runtime:latest
 
+# 安装 Docker CLI 和 Docker Compose
+RUN apt-get update && apt-get install -y \
+    docker.io \
+    docker-compose \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
 # 复制编译好的二进制文件
 COPY --from=builder /app/target/release/workspace-svc .
 

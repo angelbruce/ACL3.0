@@ -1,24 +1,76 @@
 <script lang="ts" setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed, nextTick } from 'vue'
 import type {
     Project, ProjectChatMessage, ProjectContainerConfig, LlmRequest
 } from '@/types'
 import { useWorkspaceStore } from '@/stores/workspace'
-import { llmService, StreamResponse } from '@/api';
-import { FileWarningIcon, Settings2Icon, Terminal, } from 'lucide-vue-next';
-
+import { llmService, StreamResponse, workspaceService } from '@/api';
+import { Circle,DoorClosed, CircleDot, CircleIcon, Edit2Icon, FileWarningIcon, GraduationCapIcon, PlayCircle, PlusIcon, Settings2Icon, StopCircle, Terminal, Trash, } from 'lucide-vue-next';
+import TerminalComponent from '@/components/TerminalComponent.vue';
+import { useAuthStore } from '@/stores/auth'
+import { ElTooltip } from 'element-plus';
+const authStore = useAuthStore()
 const workspaceStore = useWorkspaceStore();
 const activeTab = ref(1);
 const activeTab1 = ref('basicConfig');
 const dockerCompose = ref('');
+const isContainerStarting = ref(false);
 
 interface Props {
     project: Project,
     messages: ProjectChatMessage[]
 }
 
+// 定义 emit 事件
+const emit = defineEmits<{
+    'container-ready': [configId: number, command: string]
+    'command-error': [error: string]
+    'config-ready': [configId: number]
+}>()
+
+// 待自动执行的命令
+const pendingAutoCommand = ref<number | null>(null)
+const pendingAutoCommandValue = ref('')
+
+// 终端组件引用
+const terminalRefs = ref<Record<number, InstanceType<typeof import('@/components/TerminalComponent.vue').default> | null>>({})
+
+const setTerminalRef = (el: any, configId: number) => {
+  terminalRefs.value[configId] = el
+}
+
+const executeCommand = async (configId: number, command: string) => {
+  const terminal = terminalRefs.value[configId]
+  if (terminal) {
+    console.log('[ProjectContainerConfig] Executing command in terminal:', configId, command)
+    await terminal.executeCommand(command)
+  } else {
+    console.warn('[ProjectContainerConfig] Terminal not found for config:', configId)
+  }
+}
+
+// 命令执行结果处理
+const handleCommandResult = (result: { success: boolean, output: string, error?: string }) => {
+    console.log('Command result:', result)
+    
+    // 检查输出中是否包含错误关键词
+    const errorPatterns = ['stderr','error', 'Error', 'ERROR', 'failed', 'Failed', 'FAILED', 'exception', 'Exception', 'cannot find', 'ENOENT']
+    const hasError = result.error || errorPatterns.some(pattern => result.output.includes(pattern))
+    
+    if (hasError) {
+        // 将错误信息发送到父组件
+        const errorMsg = result.error || result.output
+        emit('command-error', errorMsg)
+    }
+}
+
 let containerConfigs = ref<ProjectContainerConfig[]>([]);
 let props = defineProps<Props>();
+
+// 当前选中的 config
+const currentConfig = computed(() => {
+    return containerConfigs.value.find(c => c.id === activeTab.value)
+})
 
 onMounted(() => {
     if (props.project && props.project.id) {
@@ -27,21 +79,91 @@ onMounted(() => {
             data.forEach(x=>{
                 x.image_name =  'app-debug-base:latest'
             })
+
             let compose = data.filter(x=>x.container_name==='docker-compose.yml') || []
             let configs = data.filter(x=>x.container_name!=='docker-compose.yml') || []
-
             if(compose.length > 0) dockerCompose.value = compose[0].environment || ''
             containerConfigs.value = configs || []
-            if(containerConfigs.value.length > 0){
-                activeTab.value = containerConfigs.value[0].id;
-            }
+            if(containerConfigs.value.length === 0){ return; }
+            activeTab.value = containerConfigs.value[0].id;
+        })
+        workspaceService.getContainerStatus(props.project.id, activeTab.value).then((data: any) => {
+            allStatus.value = data.statuses || []
         })
     }
 })
 
-
+interface ContainerStatus {
+    name: string,
+    ports: string,
+    state: string,
+    command: string,
+    urls: string[],
+}
 let streamingContent = ref('');
 let isLlmRunning = ref(false);
+let allStatus = ref<ContainerStatus[]>([]);
+
+let appVisible = ref(false);
+let appShowUrl = ref('');
+
+const openAppUrl = (url: string) => {
+    appShowUrl.value = url
+    appVisible.value = true
+}
+const openAppUrlWindow = (url: string) => {
+    window.open(url, '_blank')
+}
+
+
+const closeAppUrl = () => {
+    appVisible.value = false
+}
+
+
+
+const exposedInfo = computed(() =>{
+    let id = authStore.user?.id || 0
+    if(id === 0) return {name:'', ports: '', state:'', command:'',urls:[]};
+
+    let containerId = id + '-'+ props.project.id + '-'+ activeTab.value
+    let status = allStatus.value || []
+    if(status && Array.isArray(status)){
+        for(let x of status) {
+            if(x.name === containerId){
+                console.log('container',x.name,containerId,x)
+               let data = {...x};
+               data.ports = data.ports.replaceAll(/[:\d\.]+->80\/tcp/g, '')
+                                        .replaceAll(',','\n')
+                                        .replaceAll(/[\d\.]+:/g,'')
+                                        .replaceAll(':::','')
+                                        .split('\n')
+                                        .filter(x=>x &&x.trim().length >0) .join('    ');
+
+
+                var rgx = /(\d+)\s*->\s*\d+\/tcp/g
+                let matches = [... data.ports.matchAll(rgx)] || []
+
+                var urls = []
+                let set: Record<string, boolean> = {}
+                if(matches.length > 0){
+                    for(let x of matches){
+                        var url = 'http://localhost:' + x[1]
+                        if(set[url]) continue;
+                        set[url] = true;
+                        urls.push(url)
+                    }
+                }
+
+               data.urls = urls
+               return data;
+            }
+        }
+    }
+
+    return {name:'', ports: '', state:'', command:'',urls:[]};
+})
+
 const fetchBasicInfo = () => {
     try {
         isLlmRunning.value = true;
@@ -219,6 +341,8 @@ const handleTabClick = ( tab : any, event: any) => {
     editableTabsValue.value = tab
 }
 
+
+
 const closeTab = (containerConfig: any) => {
     containerConfigs.value = containerConfigs.value.filter((item: any) => item.id !== containerConfig.id);
     for(let i = 0; i < containerConfigs.value.length; i++){
@@ -261,27 +385,133 @@ const getString = (data: any) => {
 }
 
 
-const startContainer = () => {
-    workspaceStore.startContainer(props.project.id)
+const startContainer = async () => {
+    if (isContainerStarting.value) return
+    
+    isContainerStarting.value = true
+    
+    try {
+        // 启动容器
+        await workspaceStore.startContainer(props.project.id)
+        
+        // 获取当前 config
+        const config = currentConfig.value
+        if (!config) {
+            console.error('No config selected')
+            isContainerStarting.value = false
+            return
+        }
+        
+        // 轮询容器状态，最多等待 60 秒
+        const maxAttempts = 60
+        let attempts = 0
+        let containerReady = false
+        
+        while (attempts < maxAttempts && !containerReady) {
+            await new Promise(resolve => setTimeout(resolve, 1000))
+            
+            try {
+                const response = await workspaceService.getContainerStatus(props.project.id, config.id)
+                allStatus.value = response.statuses || []
+
+                const targetStatus = response.target_status
+                containerReady = targetStatus 
+                    ? targetStatus.state?.toLowerCase() === 'running' || targetStatus.state?.toLowerCase() === 'up'
+                    : response.statuses.some((s: any) => s.state?.toLowerCase() === 'running' || s.state?.toLowerCase() === 'up')
+            } catch (e) {
+                console.error('Error checking container status:', e)
+            }
+            
+            attempts++
+        }
+        
+        if (containerReady) {
+            console.log('Container is ready, triggering auto-execute with command:', config.command)
+            // 设置待自动执行的命令
+            pendingAutoCommand.value = config.id
+            pendingAutoCommandValue.value = config.command || ''
+            
+            // 触发容器就绪事件，传递 configId 和 command
+            emit('container-ready', config.id, config.command || '')
+            
+            // 通知父组件当前 config_id
+            emit('config-ready', config.id)
+        } else {
+            console.error('Container failed to start within timeout')
+        }
+    } catch (error) {
+        console.error('Error starting container:', error)
+    } finally {
+        isContainerStarting.value = false
+    }
 }
 
+// 暴露当前选中的 config_id 给父组件
+defineExpose({
+    activeTab,
+    currentConfigId: activeTab,
+    executeCommand
+})
 
+const terminalCount = ref(0);
+const additionTerms = ref<number[]>([]);
+
+const addTerminal = () => {
+    terminalCount.value++;
+    additionTerms.value.push(terminalCount.value);
+    setTimeout(() => {
+        activeTab1.value = 'terminal-' + terminalCount.value;
+    }, 10);
+}
+const removeTerminal = (id: number) => {
+    var values = additionTerms.value;
+    for(let i = 0; i < values.length; i++){
+        let index = values[i];
+        if(index == id) {
+            values.splice(i, 1);
+            break;
+        }
+    }
+
+    additionTerms.value = values;
+    setTimeout(() => {
+        if(values.length === 0){
+            activeTab1.value = 'terminal';
+        } else {
+            activeTab1.value = 'terminal-' + additionTerms.value[additionTerms.value.length - 1];
+        }
+    }, 10); 
+}
+
+const getTerminalIndex = (id: number) => {
+    var values = additionTerms.value;
+    for(let i = 0; i < values.length; i++){
+        let index = values[i];
+        if(index == id) {
+            return i;
+        }
+    }
+    return -1;
+}
 
 </script>
-<template class="flex flex-col gap-2">
-    <div class="flex justify-start items-left my-2">
-        <el-button @click="fetchBasicInfo()" :disabled="isLlmRunning" type="primary">提取信息</el-button>
-        <el-button @click="saveContainerConfig()" type="info" v-if="containerConfigs.length > 0">更新配置</el-button>
-        <el-button type="primary" v-if="containerConfigs.length > 0" @click="startContainer()">启动</el-button>
-        <el-button type="warning" v-if="containerConfigs.length > 0">重新启动</el-button>
-        <el-button type="danger" v-if="containerConfigs.length > 0">关闭容器</el-button>
+<template class="flex flex-col gap-2 w-full">
+<div class="w-full h-full flex flex-col">
+    <div class="flex flex-row  justify-start items-left my-2">
+        <el-button-group>
+            <el-button type="warning" @click="fetchBasicInfo()" :disabled="isLlmRunning" ><GraduationCapIcon class="mr-2" /> 提取信息</el-button>
+            <el-button type="primary" v-if="containerConfigs.length > 0" @click="startContainer()"><PlayCircle class="mr-2" /> 启动调试</el-button>
+            <el-button v-if="false" >重新启动</el-button>
+            <el-button @click="saveContainerConfig()" type="" v-if="containerConfigs.length > 0"><Edit2Icon class="mr-2" /> 更新配置</el-button>
+            <!-- <el-button v-if="containerConfigs.length > 0"><StopCircle class="mr-2" /> 关闭容器</el-button> -->
+        </el-button-group>
     </div>
     <div v-if="containerConfigs.length === 0"  class="flex justify-start items-left py-4 text-surface-600 text-sm my-2 flex-row">
         <file-warning-icon class="mr-2" /><span v-if="!isLlmRunning" >暂无容器配置,请先提取信息进行配置。</span><span v-else>提取中，请稍后...</span>
     </div>
 
      <highlightjs v-if="isLlmRunning"
-              class="w-full h-30 resize-none border-none outline-none bg-transparent text-surface-700 leading-relaxed text-base
+              class="flex w-full h-30 resize-none border-none outline-none bg-transparent text-surface-700 leading-relaxed text-base
               word-break-break-word
               overflow-wrap-break-word
               whitespace-pre-wrap
@@ -291,7 +521,7 @@ const startContainer = () => {
               style="font-family: 'Georgia', 'Times New Roman', serif;"
               :code="streamingContent" 
               autodetect />
-    <div v-if="containerConfigs.length > 0 && !isLlmRunning" class="w-full ">
+    <div v-if="containerConfigs.length > 0 && !isLlmRunning" class="flex w-full ">
         <el-tabs type="card" class="w-full" @tab-remove="closeTab" @tab-click="handleTabClick" v-model="activeTab">
             <el-tab-pane :name="0" v-if="dockerCompose.length > 0">
                 <template #label>
@@ -311,24 +541,29 @@ const startContainer = () => {
                     :code="dockerCompose" 
                     autodetect />
             </el-tab-pane>
-            <el-tab-pane :name="containerConfig.id" v-for="containerConfig in containerConfigs" :key="containerConfig.id" closable @close="closeTab(containerConfig)">
+            <el-tab-pane :name="containerConfig.id" v-for="containerConfig in containerConfigs" :key="containerConfig.id" 
+                    closable @close="closeTab(containerConfig)"
+                    class="w-full h-full overflow-auto"
+                    >
                 <template #label>
                     <span>{{ containerConfig.container_name }}</span>
                 </template>
                 <div class="w-full">
-                    <el-tabs type="border-card" tab-position="top" v-model="activeTab1">
-                        <el-tab-pane name="basicConfig"> 
+                    <el-tabs type="border-card" tab-position="top" 
+                    v-model="activeTab1" 
+                    class="w-full h-full" @tab-click="handleTabClick1">
+                        <el-tab-pane name="basicConfig" class="w-full h-full"> 
                             <template #label>
                                 <settings2-icon />
                                 <span>基本设置</span>
                             </template>
-                            <div class="flex flex-col gap-2 w-full">
+                            <div class="flex flex-col gap-2 w-full overflow-auto ">
                                 <form>
                                     <el-form-item label="容器名称" prop="containerName">
                                         <input type="text" placeholder="容器名称" v-model="containerConfig.container_name"
                                             class="w-full px-3 py-2 bg-surface-100 border border-surface-200 rounded-lg  text-sm text-surface-600" />
                                     </el-form-item>
-                                    <el-form-item label="项目路径" prop="projectPath">
+                                    <el-form-item label="项目路径" prop="projectPath" v-show="false">
                                         <input type="text" placeholder="项目路径，linux路径"
                                             v-model="containerConfig.project_dir"
                                             class="w-full px-3 py-2 bg-surface-100 border border-surface-200 rounded-lg  text-sm text-surface-600" />
@@ -371,7 +606,7 @@ const startContainer = () => {
                                     
                                     <el-form-item label="容器镜像" prop="image">
                                         <input type="text" placeholder="容器镜像"
-                                            readonly
+                                            readonly 
                                             v-model="containerConfig.image_name"
                                             class="w-full px-3 py-2 bg-surface-100 border border-surface-200 rounded-lg  text-sm text-surface-600" />
                                     </el-form-item>
@@ -380,19 +615,220 @@ const startContainer = () => {
                                 </form>
                             </div>
                         </el-tab-pane>
-                        <el-tab-pane name="terminal">
+                        <el-tab-pane name="terminal" class="w-full h-full">
                             <template #label>
                                 <terminal />
-                                <span>终端</span>
+                                <span class="text-sm text-surface-600 mx-2 font-bold">终端</span>
+                                <button v-if="additionTerms.length === 0" class="w-6 h-6 
+                                        flex items-center justify-center 
+                                        bg-surface-100 
+                                        rounded-full border border-surface-200 
+                                ">
+                                   <PlusIcon @click="addTerminal" class="size-4" />
+                                </button>
                             </template>
-                            <div>
-                                输入输出终端
+                            <div class="w-full h-full">
+                                <div v-if="isContainerStarting" class="text-red-500">容器启动中...</div>
+                                <div v-else class="w-full h-full flex items-start justify-left text-color-blue-300 mb-2 flex-row">
+                                    <div 
+                                        class="px-2 py-2 
+                                        flex items-start justify-left h-full
+                                        text-xs
+                                        border border-surface-200 rounded-sm
+                                        font-bold
+                                        text-surface-600" 
+                                        >
+                                        容器状态
+                                    </div>
+                                   <div 
+                                        class="px-2 py-2 
+                                        flex items-start justify-left h-full
+                                        border border-surface-200 rounded-sm
+                                        text-surface-600" >
+                                        <el-tooltip 
+                                            effect="dark"
+                                            :content="exposedInfo.state === 'running' ? '运行中' : '已停止'"
+                                            placement="top"
+                                        >
+                                           <Circle class="flex size-4" :color="exposedInfo.state === 'running' ? 'green': 'gray'"  />
+                                        </el-tooltip>    
+                                    </div>
+                                    <div 
+                                        v-if="exposedInfo.name && exposedInfo.name.length >0"
+                                        class="px-2 py-2 
+                                        flex items-start justify-left h-full
+                                        text-xs
+                                        border border-surface-200 rounded-sm
+                                        text-surface-600" 
+                                        >
+                                        {{exposedInfo.name}}
+                                    </div>
+                                    <div  
+                                        v-if="exposedInfo.name && exposedInfo.name.length >0"
+                                        class="px-2 py-2 
+                                        flex items-start justify-left h-full
+                                        flex-1
+                                        text-xs
+                                        border border-surface-200 rounded-sm
+                                        text-surface-600" 
+                                        >
+                                        {{exposedInfo.ports}}
+                                    </div>
+                                    <div  
+                                        v-if="exposedInfo.name && exposedInfo.name.length >0"
+                                        class="px-2 py-2 
+                                        flex items-start justify-left h-full
+                                        flex-1
+                                        text-xs
+                                        border border-surface-200 rounded-sm
+                                        text-surface-600" 
+                                        >
+                                        <div  v-for="url in exposedInfo.urls" :key="url" class="flex items-center justify-left">
+                                        <a href="javascript:return false;" @click.stop="openAppUrl(url)"
+                                         class="
+                                          text-surface-600
+                                          hover:underline
+                                          hover:text-red-600
+                                          focus:underline
+                                          transition-all duration-300
+                                          mr-2
+                                         "
+                                         >
+                                         {{url}}
+                                        </a>
+                                         <PlusIcon class="size-4 cursor-pointer " @click.stop="openAppUrlWindow(url)" />
+                                         </div>
+                                    </div>
+                                </div>
+                                <TerminalComponent 
+                                    :ref="(el: any) => setTerminalRef(el, containerConfig.id)"
+                                    :project-id="project.id" 
+                                    :container-name="containerConfig.container_name"
+                                    :config-id="containerConfig.id"
+                                    :auto-command="containerConfig.id === pendingAutoCommand ? pendingAutoCommandValue : ''"
+                                    height="350px"
+                                    @command-result="handleCommandResult"
+                                />
                             </div>
                         </el-tab-pane>
+                        <template v-for="additionTerm in additionTerms" :key="additionTerm">
+                            <el-tab-pane :name="'terminal-' + additionTerm" class="w-full h-full" >
+                                <template #label>
+                                    <terminal />
+                                    <span class="text-sm text-surface-600 mx-2 font-bold">终端{{ additionTerm }}</span>
+                                       <button v-if="getTerminalIndex(additionTerm) === additionTerms.length - 1" 
+                                   class="w-6 h-6 
+                                            flex items-center justify-center 
+                                            bg-surface-100 
+                                            rounded-full border border-surface-200 
+                                    "  @click="addTerminal">
+                                        +
+                                    </button>
+                                     <button class="w-6 h-6 ml-1
+                                            flex items-center justify-center 
+                                            bg-surface-100 
+                                            rounded-full border border-surface-200 
+                                    " @click="removeTerminal(additionTerm)">
+                                        x
+                                    </button>
+                                </template>
+                                <div class="w-full h-full">
+                                    <div v-if="isContainerStarting" class="text-red-500">容器启动中...</div>
+                                    <div v-else class="w-full h-full flex items-start justify-left text-color-blue-300 mb-2 flex-row">
+                                        <div 
+                                            class="px-2 py-2 
+                                            flex items-start justify-left h-full
+                                            text-xs
+                                            border border-surface-200 rounded-sm
+                                            font-bold
+                                            text-surface-600" 
+                                            >
+                                            容器状态
+                                        </div>
+                                        <div 
+                                            class="px-2 py-2 
+                                            flex items-start justify-left h-full
+                                            border border-surface-200 rounded-sm
+                                            text-surface-600" >
+                                            <el-tooltip 
+                                                effect="dark"
+                                                :content="exposedInfo.state === 'running' ? '运行中' : '已停止'"
+                                                placement="top"
+                                            >
+                                            <Circle class="flex size-4" :color="exposedInfo.state === 'running' ? 'green': 'gray'"  />
+                                            </el-tooltip>    
+                                        </div>
+                                        <div 
+                                            v-if="exposedInfo.name && exposedInfo.name.length >0"
+                                            class="px-2 py-2 
+                                            flex items-start justify-left h-full
+                                            text-xs
+                                            border border-surface-200 rounded-sm
+                                            text-surface-600" 
+                                            >
+                                            {{exposedInfo.name}}
+                                        </div>
+                                        <div  
+                                            v-if="exposedInfo.name && exposedInfo.name.length >0"
+                                            class="px-2 py-2 
+                                            flex items-start justify-left h-full
+                                            flex-1
+                                            text-xs
+                                            border border-surface-200 rounded-sm
+                                            text-surface-600" 
+                                            >
+                                            {{exposedInfo.ports}}
+                                        </div>
+                                        <div  
+                                            v-if="exposedInfo.name && exposedInfo.name.length >0"
+                                            class="px-2 py-2 
+                                            flex items-start justify-left h-full
+                                            flex-1
+                                            text-xs
+                                            border border-surface-200 rounded-sm
+                                            text-surface-600" 
+                                            >
+                                            <div  v-for="url in exposedInfo.urls" :key="url" class="flex items-center justify-left">
+                                                <a href="javascript:return false;" @click.stop="openAppUrl(url)"
+                                                class="
+                                                text-surface-600
+                                                hover:underline
+                                                hover:text-red-600
+                                                focus:underline
+                                                transition-all duration-300
+                                                mr-2
+                                                "
+                                                >
+                                                {{url}}
+                                                </a>
+                                                <PlusIcon class="size-4 cursor-pointer " @click.stop="openAppUrlWindow(url)" />
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <TerminalComponent 
+                                        :ref="(el: any) => setTerminalRef(el, containerConfig.id)"
+                                        :project-id="project.id" 
+                                        :container-name="containerConfig.container_name"
+                                        :config-id="containerConfig.id"
+                                        :auto-command="containerConfig.id === pendingAutoCommand ? pendingAutoCommandValue : ''"
+                                        height="350px"
+                                        @command-result="handleCommandResult"
+                                    />
+                                </div>
+                            </el-tab-pane>
+                        </template>
                     </el-tabs>
                 </div>
             </el-tab-pane>
         </el-tabs>
-
     </div>
+</div>
+
+    <el-dialog
+        v-model="appVisible"
+        class="w-full h-full flex items-start justify-center"
+        :close-on-click-modal="false"
+    >
+        <iframe v-if="appVisible" :src="appShowUrl"  class="w-full h-100 mt-10" style="border: none;height:800px;width:800px;"></iframe>
+    </el-dialog>
 </template>

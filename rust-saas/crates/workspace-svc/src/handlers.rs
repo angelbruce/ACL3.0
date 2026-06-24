@@ -1,5 +1,6 @@
-use axum::{extract::{Path, Extension}, Json, http::{HeaderName, HeaderValue}, response::IntoResponse,response::Response};
+use axum::{extract::{Path, Extension, Query}, Json, http::{HeaderName, HeaderValue}, response::IntoResponse,response::Response};
 use axum::body::Body;
+use axum::response::sse::{Event, Sse};
 use chrono::{Utc, DateTime};
 use mime_guess::from_path;
 use serde::{Serialize, Deserialize};
@@ -10,7 +11,7 @@ use shared::models::{
     Project, ProjectFile, ProjectMessage, ProjectSummary, ProjectWithNames,
     CreateProjectRequest as SharedCreateProjectRequest, UpdateProjectRequest as SharedUpdateProjectRequest,
     CreateProjectFileRequest, UpdateProjectFileRequest, AddProjectMessageRequest,
-    CreateOrUpdateProjectSummaryRequest, ProjectContainerConfig
+    CreateOrUpdateProjectSummaryRequest, ProjectContainerConfig, ChatMessage, MCPTool, LlmTool, LlmToolFunction
 };
 use shared::utils::Claims;
 use std::collections::HashMap;
@@ -19,12 +20,19 @@ use std::fs;
 use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::thread;
 use tokio::runtime::Runtime; 
 use tokio::task;
-use futures::Stream;
+use futures::{Stream, StreamExt};
 use crate::repository::WorkspaceRepository;
 use crate::voice::{Article};
+use crate::llm_client::{LlmClient, StreamResponse, ToolExecutor};
+use crate::container::{
+    ProjectDeploymentContext, ProjectFileInfo, ContainerDeploymentResult,
+    ContainerDeployer, ExecuteCommandResult, ContainerStatus,
+    format_container_name, get_debug_directory
+};
 
 fn get_workspace_root() -> PathBuf {
     PathBuf::from(env::var("WORKSPACE_ROOT").unwrap_or_else(|_| "./workspace_storage".to_string()))
@@ -141,7 +149,6 @@ pub async fn update_project_file(
         };
 
         task::spawn( async move {
-            println!("{:?}", article);  
             match Article::create_voice(article.clone()).await {
                 Ok(_) => println!("Voice created successfully"),
                 Err(e) => println!("Error creating voice: {:?}", e),
@@ -173,6 +180,46 @@ pub async fn get_project_file_voice_link(
     let file = repo.get_project_file_by_id(file_id, claims.user_id).await.map_err(|e| ServiceError::BadRequest(e.to_string()))?;
     let file_path = Article::get_voice_link_path(claims.user_id, file.project_id, file.id, "xtts".to_string(), 1).await.map_err(|e| ServiceError::BadRequest(e.to_string()))?;
     Ok(Json(file_path.to_string()))
+}
+
+/// 刷新项目文件到容器并执行命令
+#[derive(Debug, Deserialize)]
+pub struct RefreshFileRequest {
+    pub file_id: i64,
+    pub config_id: i64,
+    pub content: String,
+    pub command: String,
+}
+
+pub async fn refresh_project_file_to_container(
+    Extension(claims): Extension<Claims>,
+    Path(project_id): Path<i64>,
+    Json(req): Json<RefreshFileRequest>,
+) -> ServiceResult<Json<RefreshFileResult>> {
+    let result = ContainerDeployer::refresh_file_and_execute(
+        claims.user_id,
+        project_id,
+        req.config_id,
+        req.file_id,
+        &req.content,
+        &req.command,
+    ).await;
+    
+    match result {
+        Ok(output) => Ok(Json(RefreshFileResult {
+            success: true,
+            message: "File refreshed and command executed".to_string(),
+            output,
+        })),
+        Err(e) => Err(ServiceError::BadRequest(e)),
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct RefreshFileResult {
+    pub success: bool,
+    pub message: String,
+    pub output: String,
 }
 
 
@@ -479,7 +526,6 @@ pub async fn get_project_container_config(
     Path(project_id):Path<i64>,
 ) -> ServiceResult<Json<Vec<ProjectContainerConfig>>> {
     let repo = WorkspaceRepository::new();
-    println!("{:?}", project_id);
     let config = repo.get_project_container_config(project_id).await;    
     match config {
         Ok(config) => Ok(Json(config)),
@@ -495,18 +541,530 @@ pub async fn save_project_container_config(
     Path(project_id): Path<i64>,
     Json(req): Json<Vec<ProjectContainerConfig>>,    
 ) -> ServiceResult<Json<Vec<ProjectContainerConfig>>> {
+    let user_id = claims.user_id;
     let repo = WorkspaceRepository::new();
-    let config = repo.save_project_container_config(claims.user_id, project_id, req).await?;
-    Ok(Json(config))
+
+    println!("[save_project_container_config] Stopping existing containers for project_id: {}", project_id);
+    let debug_dir = get_debug_directory(user_id, project_id);
+    let _ = ContainerDeployer::stop_containers(&debug_dir).await;
+
+    println!("[save_project_container_config] Saving container configs for project_id: {}", project_id);
+    let config = repo.save_project_container_config(user_id, project_id, req).await?;
+
+    println!("[save_project_container_config] Starting containers for project_id: {}", project_id);
+    let project = repo.get_project_info_for_deployment(project_id).await?
+        .ok_or(ServiceError::NotFound)?;
+
+    let container_configs = repo.get_project_container_config(project_id).await?;
+    let project_files = repo.get_project_files_info(project_id).await?;
+
+    let deploy_result = ContainerDeployer::deploy_project(
+        user_id,
+        project_id,
+        project.name.clone(),
+        project.agent_id,
+        project.model_id,
+        container_configs.clone(),
+        project_files.clone(),
+    ).await
+    .map_err(|e| ServiceError::InternalError)?;
+
+    let compose_config_content = std::fs::read_to_string(&deploy_result.docker_compose_path)
+        .map_err(|_| ServiceError::InternalError)?;
+
+    let existing_compose_config = repo.get_project_container_config(project_id).await?
+        .into_iter()
+        .find(|c| c.container_name == "docker-compose.yml");
+
+    if let Some(mut cfg) = existing_compose_config {
+        cfg.command = compose_config_content;
+        cfg.updated_at = chrono::Utc::now().naive_utc();
+        repo.update_project_container_config(cfg).await?;
+    } else {
+        let compose_config_entry = ProjectContainerConfig {
+            id: 0,
+            project_id,
+            project_dir: "/debug".to_string(),
+            published_ports: "".to_string(),
+            volumes: "".to_string(),
+            environment: "".to_string(),
+            command: compose_config_content,
+            working_dir: "".to_string(),
+            tags: "".to_string(),
+            container_name: "docker-compose.yml".to_string(),
+            cpu_usage: "".to_string(),
+            memory_usage: "".to_string(),
+            image_name: "".to_string(),
+            creator_id: user_id,
+            created_at: chrono::Utc::now().naive_utc(),
+            updated_at: chrono::Utc::now().naive_utc(),
+        };
+        repo.insert_project_container_config(user_id, project_id, compose_config_entry).await?;
+    }
+
+    let final_configs = repo.get_project_container_config(project_id).await?;
+
+    task::spawn(async move {
+        match ContainerDeployer::start_containers(&debug_dir).await {
+            Ok(result) => {
+                println!("[save_project_container_config] Docker compose up output: {}", result.output);
+                println!("[save_project_container_config] Port mappings: {:?}", result.port_mappings);
+            }
+            Err(e) => {
+                println!("[save_project_container_config] Failed to start containers: {}", e);
+            }
+        }
+    });
+
+    Ok(Json(final_configs))
 }
 
 pub async fn start_container(
     Extension(claims): Extension<Claims>,
     Path(project_id): Path<i64>,
+) -> ServiceResult<Json<ContainerDeploymentResult>> {
+    let user_id = claims.user_id;
+    let repo = WorkspaceRepository::new();
+
+    println!("[start_container] Received request for project_id: {}, user_id: {}", project_id, user_id);
+
+    let project = repo.get_project_info_for_deployment(project_id).await?
+        .ok_or(ServiceError::NotFound)?;
+
+    println!("[start_container] Project found: {:?}, agent_id: {:?}, model_id: {:?}", project.name, project.agent_id, project.model_id);
+
+    let container_configs = repo.get_project_container_config(project_id).await?;
+    println!("[start_container] Container configs count: {}", container_configs.len());
+
+    let project_files = repo.get_project_files_info(project_id).await?;
+    println!("[start_container] Project files count: {}", project_files.len());
+
+    let deploy_result = ContainerDeployer::deploy_project(
+        user_id,
+        project_id,
+        project.name.clone(),
+        project.agent_id,
+        project.model_id,
+        container_configs.clone(),
+        project_files.clone(),
+    ).await
+    .map_err(|e| ServiceError::InternalError)?;
+
+    println!("[start_container] Deploy result: {:?}", deploy_result);
+
+    let ids = container_configs.clone().into_iter().filter(|c| c.container_name != "docker-compose.yml")
+        .map(|c| c.id).collect::<Vec<_>>();
+
+    let first_container_id = match ids.len() {
+                                0 => 0,
+                                _ => ids[0],
+                            };
+    let container_name = format!("{}-{}-{}", user_id, project_id, first_container_id);
+        
+    let mcp_server_url = format!("http://{}:80", container_name);
+
+    let context = ProjectDeploymentContext {
+        user_id,
+        project_id,
+        project_name: project.name,
+        agent_id: project.agent_id,
+        model_id: project.model_id,
+        container_configs: container_configs.clone(),
+        project_files: project_files.clone(),
+        container_name: container_name.clone(),
+        mcp_server_url,
+    };
+
+    let debug_dir = PathBuf::from(&deploy_result.debug_dir);
+    let compose_config_content = std::fs::read_to_string(&deploy_result.docker_compose_path)
+        .map_err(|_| ServiceError::InternalError)?;
+
+    let existing_configs: Vec<ProjectContainerConfig> = container_configs
+        .into_iter()
+        .filter(|c| c.container_name != "docker-compose.yml")
+        .collect();
+
+    repo.save_project_container_config(user_id, project_id, existing_configs).await?;
+
+    let existing_compose_config = repo.get_project_container_config(project_id).await?
+        .into_iter()
+        .find(|c| c.container_name == "docker-compose.yml");
+
+    if let Some(mut config) = existing_compose_config {
+        config.command = compose_config_content;
+        config.updated_at = chrono::Utc::now().naive_utc();
+        repo.update_project_container_config(config).await?;
+    } else {
+        let compose_config_entry = ProjectContainerConfig {
+            id: 0,
+            project_id,
+            project_dir: "/debug".to_string(),
+            published_ports: "".to_string(),
+            volumes: "".to_string(),
+            environment: "".to_string(),
+            command: compose_config_content,
+            working_dir: "".to_string(),
+            tags: "".to_string(),
+            container_name: "docker-compose.yml".to_string(),
+            cpu_usage: "".to_string(),
+            memory_usage: "".to_string(),
+            image_name: "".to_string(),
+            creator_id: user_id,
+            created_at: chrono::Utc::now().naive_utc(),
+            updated_at: chrono::Utc::now().naive_utc(),
+        };
+        repo.insert_project_container_config(user_id, project_id, compose_config_entry).await?;
+    }
+
+    task::spawn(async move {
+        println!("[start_container] Spawning async task to start containers...");
+        println!("[start_container] Context debug: user_id={}, project_id={}, model_id={:?}", 
+                 context.user_id, context.project_id, context.model_id);
+        println!("[start_container] Project files count: {}", context.project_files.len());
+        
+        match ContainerDeployer::start_containers(&debug_dir).await {
+            Ok(result) => {
+                println!("[start_container] Docker compose up output: {}", result.output);
+                println!("[start_container] Port mappings: {:?}", result.port_mappings);
+                println!("[start_container] Calling LLM for deployment...");
+                match ContainerDeployer::call_llm_for_deployment(&context).await {
+                    Ok(response) => println!("[start_container] LLM deployment call completed: {}", response),
+                    Err(e) => println!("[start_container] LLM deployment call failed: {}", e),
+                }
+            }
+            Err(e) => println!("[start_container] Failed to start docker compose: {}", e),
+        }
+    });
+
+    println!("[start_container] Returning success response");
+
+    Ok(Json(ContainerDeploymentResult {
+        success: true,
+        message: "Deployment started successfully".to_string(),
+        debug_dir: deploy_result.debug_dir,
+        container_names: deploy_result.container_names,
+        docker_compose_path: deploy_result.docker_compose_path,
+    }))
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ExecuteCommandRequest {
+    pub project_id: i64,
+    pub config_id: i64,
+    pub command: String,
+}
+
+pub async fn execute_command(
+    Extension(claims): Extension<Claims>,
+    Json(req): Json<ExecuteCommandRequest>,
+) -> ServiceResult<Json<ExecuteCommandResult>> {
+    let user_id = claims.user_id;
+
+    let result = ContainerDeployer::execute_command_in_container(
+        user_id,
+        req.project_id,
+        req.config_id,
+        &req.command,
+    ).await
+    .map_err(|e| ServiceError::InternalError)?;
+
+    Ok(Json(result))
+}
+
+pub async fn execute_command_stream_handler(
+    Extension(claims): Extension<Claims>,
+    Json(req): Json<ExecuteCommandRequest>,
+) -> ServiceResult<Response<Body>> {
+    let user_id = claims.user_id;
+
+    let stream = ContainerDeployer::execute_command_stream(
+        user_id,
+        req.project_id,
+        req.config_id,
+        &req.command,
+    ).await
+    .map_err(|e| ServiceError::InternalError)?;
+
+    let sse_stream = futures::stream::StreamExt::map(stream, |result| {
+        let data = match result {
+            Ok(line) => format!("data: {}\n\n", line),
+            Err(e) => format!("data: {}\n\n", e),
+        };
+        Ok::<bytes::Bytes, Box<dyn std::error::Error + Send + Sync>>(bytes::Bytes::from(data))
+    });
+
+    let body = Body::from_stream(sse_stream);
+
+    let response = Response::builder()
+        .header("Content-Type", "text/event-stream")
+        .header("Cache-Control", "no-cache")
+        .header("Connection", "keep-alive")
+        .body(body)
+        .map_err(|e| ServiceError::InternalError)?;
+
+    Ok(response)
+}
+
+pub async fn stop_container(
+    Extension(claims): Extension<Claims>,
+    Path(project_id): Path<i64>,
 ) -> ServiceResult<Json<HashMap<String, String>>> {
-    //todo: 实现启动容器的逻辑
-    Ok(Json(HashMap::from([("message".to_string(), "Container started successfully".to_string())])))
+    let user_id = claims.user_id;
+    let debug_dir = get_debug_directory(user_id, project_id);
+
+    let result = ContainerDeployer::stop_containers(&debug_dir).await
+        .map_err(|e| ServiceError::InternalError)?;
+
+    Ok(Json(HashMap::from([("message".to_string(), result)])))
+}
+
+pub async fn get_container_status(
+    Extension(claims): Extension<Claims>,
+    Path(project_id): Path<i64>,
+    Query(params): Query<GetContainerStatusParams>,
+) -> ServiceResult<Json<ContainerStatusResponse>> {
+    let user_id = claims.user_id;
+
+    let statuses = ContainerDeployer::get_container_status(user_id, project_id).await
+        .map_err(|e| ServiceError::InternalError)?;
+
+    let target_status = params.config_id.and_then(|config_id| {
+        let full_container_name = format!("{}-{}-{}", user_id, project_id, config_id);
+        statuses.iter().find(|s| s.name == full_container_name || s.name.contains(&full_container_name)).cloned()
+    });
+
+    Ok(Json(ContainerStatusResponse {
+        statuses,
+        target_status,
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetContainerStatusParams {
+    pub config_id: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ContainerStatusResponse {
+    pub statuses: Vec<ContainerStatus>,
+    pub target_status: Option<ContainerStatus>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GetContainerLogsRequest {
+    pub container_name: Option<String>,
+    pub tail: Option<usize>,
+}
+
+pub async fn get_container_logs(
+    Extension(claims): Extension<Claims>,
+    Path(project_id): Path<i64>,
+    Json(req): Json<GetContainerLogsRequest>,
+) -> ServiceResult<Json<HashMap<String, String>>> {
+    let user_id = claims.user_id;
+
+    let logs = ContainerDeployer::get_container_logs(
+        user_id,
+        project_id,
+        req.container_name.as_deref(),
+        req.tail,
+    ).await
+    .map_err(|e| ServiceError::InternalError)?;
+
+    Ok(Json(HashMap::from([("logs".to_string(), logs)])))
+}
+
+pub async fn cleanup_container(
+    Extension(claims): Extension<Claims>,
+    Path(project_id): Path<i64>,
+) -> ServiceResult<Json<HashMap<String, String>>> {
+    let user_id = claims.user_id;
+
+    let result = ContainerDeployer::cleanup_debug_directory(user_id, project_id).await
+        .map_err(|e| ServiceError::InternalError)?;
+
+    Ok(Json(HashMap::from([("message".to_string(), result)])))
 }
 
 
 //暂时不考虑越权问题 横向与纵向都不考虑。
+
+// =============================================
+// Workspace 专用的 Chat/Stream 接口
+// =============================================
+
+type SSEStream = Pin<Box<dyn Stream<Item = Result<Event, std::convert::Infallible>> + Send>>;
+
+#[derive(Debug, Deserialize)]
+pub struct WorkspaceChatRequest {
+    pub model_id: i64,
+    pub agent_id: Option<i64>,
+    pub project_id: i64,
+    pub config_id: i64,
+    pub messages: Vec<ChatMessage>,
+}
+
+/// Workspace 专用的 Chat/Stream 接口
+/// 从数据库读取工具配置，并通过容器的 MCP-SSE 服务执行工具调用
+pub async fn workspace_chat_stream(
+    Extension(claims): Extension<Claims>,
+    Json(req): Json<WorkspaceChatRequest>,
+) -> Sse<SSEStream> {
+    let user_id = claims.user_id;
+    let repo = WorkspaceRepository::new();
+    
+    // 1. 获取模型信息
+    let model = match repo.get_model(req.model_id).await {
+        Ok(m) => m,
+        Err(e) => {
+            let error_msg = format!("{{\"error\": \"Model not found: {}\"}}", e);
+            let stream: SSEStream = Box::pin(futures::stream::once(async move {
+                Ok::<Event, std::convert::Infallible>(Event::default().data(error_msg))
+            }));
+            return Sse::new(stream);
+        }
+    };
+    
+    // 2. 获取容器 MCP-SSE URL
+    let container_name = format!("{}-{}-{}", user_id, req.project_id, req.config_id);
+    let mcp_server_url = format!("http://{}:80", container_name);
+    
+    // 3. 从容器 MCP-SSE 服务动态获取工具列表
+    let tool_executor = ToolExecutor::new(HashMap::new(), &mcp_server_url);
+    let mut tools = match tool_executor.list_tools(None).await {
+        Ok(t) => {
+            println!("[DEBUG] Retrieved {} tools from container MCP-SSE", t.len());
+            t
+        },
+        Err(e) => {
+            println!("[DEBUG] Failed to get tools from container: {}, using default tools", e);
+            // 使用默认工具列表，因为容器 MCP-SSE 服务可能不支持 tools/list 方法
+            vec![
+                MCPTool {
+                    name: "execute_command".to_string(),
+                    description: "Execute a shell command in the debug container. Use this to run commands like npm install, npm run serve, etc.".to_string(),
+                    input_schema: serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "command": {
+                                "type": "string",
+                                "description": "The shell command to execute"
+                            },
+                            "workDir": {
+                                "type": "string",
+                                "description": "The working directory for the command, defaults to /app"
+                            }
+                        },
+                        "required": ["command"]
+                    }),
+                    output_schema: serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "output": {
+                                "type": "string",
+                                "description": "The command output"
+                            },
+                            "exit_code": {
+                                "type": "integer",
+                                "description": "The exit code of the command"
+                            }
+                        }
+                    }),
+                    server_id: None,
+                }
+            ]
+        }
+    };
+    
+    // 4. 如果有 agent_id，获取 agent 的系统提示词和工具
+    let mut messages = req.messages.clone();
+    if let Some(agent_id) = req.agent_id {
+        println!("[DEBUG] Using agent_id: {}", agent_id);
+        
+        if let Ok(Some(system_prompt)) = repo.get_agent_system_prompt(agent_id).await {
+            println!("[DEBUG] Got agent system prompt, length: {}", system_prompt.len());
+            messages.insert(0, ChatMessage {
+                role: "system".to_string(),
+                content: Some(system_prompt),
+                ..Default::default()
+            });
+        }
+        
+        if let Ok(agent_tools) = repo.get_agent_tools(agent_id).await {
+            println!("[DEBUG] Got {} agent tools", agent_tools.len());
+            tools.extend(agent_tools);
+        }
+    }
+    
+    // 5. 创建 LLM 客户端
+    let llm_client = LlmClient::new(&model.access_url, &model.api_key, &model.name);
+    
+    // 5. 创建空 MCP 服务器映射，工具调用使用默认 URL
+    let mcp_servers: HashMap<i64, String> = HashMap::new();
+    
+    // 6. 调用 LLM + 工具执行循环
+    let stream: Pin<Box<dyn Stream<Item = StreamResponse> + Send>> = if tools.is_empty() {
+        // 没有工具，使用普通聊天流
+        match llm_client.chat_stream(&messages, None).await {
+            Ok(s) => Box::pin(s) as Pin<Box<dyn Stream<Item = StreamResponse> + Send>>,
+            Err(e) => {
+                let stream: SSEStream = Box::pin(futures::stream::once(async move {
+                    Ok::<Event, std::convert::Infallible>(Event::default().data(format!("{{\"error\": \"LLM error: {}\"}}", e)))
+                }));
+                return Sse::new(stream);
+            }
+        }
+    } else {
+        // 有工具，使用工具执行循环
+        match llm_client.chat_with_tools(
+            messages,
+            Some(&tools),
+            mcp_servers,
+            &mcp_server_url,
+            10,
+            user_id,
+            req.project_id,
+            Some(req.config_id)
+        ).await {
+            Ok(s) => Box::pin(s) as Pin<Box<dyn Stream<Item = StreamResponse> + Send>>,
+            Err(e) => {
+                let stream: SSEStream = Box::pin(futures::stream::once(async move {
+                    Ok::<Event, std::convert::Infallible>(Event::default().data(format!("{{\"error\": \"LLM error: {}\"}}", e)))
+                }));
+                return Sse::new(stream);
+            }
+        }
+    };
+    
+    // 8. 转换为 SSE 事件流
+    let sse_stream: SSEStream = Box::pin(stream.map(|res: StreamResponse| {
+        match serde_json::to_string(&res) {
+            Ok(json_str) => Ok::<Event, std::convert::Infallible>(Event::default().data(json_str)),
+            Err(_) => Ok::<Event, std::convert::Infallible>(Event::default().data("{\"error\": \"Serialization error\"}")),
+        }
+    }));
+    
+    Sse::new(sse_stream)
+}
+
+
+#[derive(Debug, Serialize)]
+pub struct MessageDeleteProjectMessageResponse {
+    pub project_id: i64,
+    pub message_id: i64,
+    pub message: String,
+}
+
+pub async fn delete_project_message(
+    Extension(claims): Extension<Claims>,
+    Path((project_id, message_id)): Path<(i64, i64)>,
+) -> ServiceResult<Json<MessageDeleteProjectMessageResponse>> {
+    let user_id = claims.user_id;
+    let repo = WorkspaceRepository::new();
+    repo.delete_project_message(project_id, message_id).await?;
+    Ok(Json(MessageDeleteProjectMessageResponse {
+        project_id,
+        message_id,
+        message: "Message deleted".to_string(),
+    }))
+}

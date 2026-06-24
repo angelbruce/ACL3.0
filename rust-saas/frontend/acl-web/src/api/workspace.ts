@@ -203,6 +203,9 @@ export const workspaceService = {
     })
   },
 
+
+  deleteProjectMessage: (projectId: number, messageId: number) => api.delete<{ message: string }>(workspaceApi, `/api/projects/${projectId}/messages/${messageId}`),
+
   getProjectSummaries: (projectId: number) => 
     api.get<ProjectSummary[]>(workspaceApi, `/api/projects/${projectId}/summaries`),
 
@@ -238,4 +241,140 @@ export const workspaceService = {
   getProjectContainerConfigs: (projectId: number) => api.get<ProjectContainerConfig[]>(workspaceApi, `/api/project-container-configs/${projectId}`),
   saveProjectContainerConfigs: (projectId:number, data: ProjectContainerConfig[]) => api.post<ProjectContainerConfig[]>(workspaceApi, `/api/project-container-configs/${projectId}`, data),
   startContainer: (projectId: number) => api.post<{ message: string }>(workspaceApi, `/api/project-container-configs/${projectId}/start`),
-  }
+  executeCommand: (projectId: number, configId: number, command: string) => api.post<{ success: boolean, output: string, error?: string }>(workspaceApi, '/api/projects/execute-command', {
+    project_id: projectId,
+    config_id: configId,
+    command
+  }),
+
+  executeCommandStream: (projectId: number, configId: number, command: string, onData: (data: string) => void, onError: (error: Error) => void, onComplete: () => void) => {
+    const url = `${workspaceApi.defaults.baseURL}/api/projects/execute-command-stream`
+    const accessToken = localStorage.getItem('access_token')
+
+    fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        project_id: projectId,
+        config_id: configId,
+        command
+      }),
+    })
+    .then(async (response) => {
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      const reader = response.body?.getReader()
+      if (!reader) {
+        throw new Error('No response body')
+      }
+
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.substring(6)
+            onData(data)
+          }
+        }
+      }
+
+      onComplete()
+    })
+    .catch(onError)
+  },
+  getContainerStatus: (projectId: number, configId?: number) => {
+    const params = configId ? `?config_id=${configId}` : ''
+    return api.get<{ statuses: any[], target_status: any | null }>(workspaceApi, `/api/project-container-configs/${projectId}/status${params}`)
+  },
+  stopContainer: (projectId: number) => api.post<{ message: string }>(workspaceApi, `/api/project-container-configs/${projectId}/stop`),
+  cleanupContainer: (projectId: number) => api.post<{ message: string }>(workspaceApi, `/api/project-container-configs/${projectId}/cleanup`),
+  
+  // 刷新项目文件到容器并执行命令
+  refreshFileToContainer: (projectId: number, data: {
+    file_id: number
+    config_id: number
+    content: string
+    command: string
+  }) => api.post<{ success: boolean, message: string, output: string }>(workspaceApi, `/api/projects/${projectId}/refresh-file`, data),
+
+  // Workspace 专用的 Chat/Stream 接口
+  workspaceChatStream: async (
+    request: {
+      model_id: number
+      project_id: number
+      config_id: number
+      agent_id?: number
+      messages: { role: string; content?: string; tool_call_id?: string; name?: string; tool_calls?: unknown }[]
+    },
+    onMessage: (data: { content: string; tool_calls?: unknown; finish_reason?: string }) => void,
+    onError?: (error: Error) => void
+  ): Promise<void> => {
+    const token = localStorage.getItem('access_token')
+    const response = await fetch(`${workspaceApi.defaults.baseURL}/api/chat/stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(request),
+    })
+
+    if (!response.body) {
+      onError?.(new Error('No response body'))
+      return
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+
+    return new Promise((resolve, reject) => {
+      const processStream = () => {
+        reader.read().then(({ done, value }) => {
+          if (done) {
+            resolve()
+            return
+          }
+
+          const chunk = decoder.decode(value, { stream: true })
+          const lines = chunk.split('\n')
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const dataStr = line.slice(6).trim()
+              if (dataStr === '[DONE]' || dataStr === 'DONE') {
+                continue
+              }
+              try {
+                const data = JSON.parse(dataStr)
+                onMessage(data)
+              } catch {
+                // Ignore parse errors
+              }
+            }
+          }
+
+          processStream()
+        }).catch((error) => {
+          onError?.(error)
+          reject(error)
+        })
+      }
+
+      processStream()
+    })
+  },
+}

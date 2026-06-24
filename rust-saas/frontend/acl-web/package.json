@@ -12,6 +12,8 @@
     "@highlightjs/vue-plugin": "^2.1.0",
     "@maxgraph/core": "^0.23.0",
     "@vue-flow/core": "^1.33.5",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
     "axios": "^1.6.7",
     "element-plus": "^2.14.1",
     "highlight.js": "^11.11.1",

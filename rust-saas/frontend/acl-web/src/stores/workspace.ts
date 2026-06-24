@@ -267,6 +267,21 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
+  const deleteProjectMessage = async (projectId: number, messageId: number) => {
+    loading.value = true
+    error.value = null
+    try {
+      await workspaceService.deleteProjectMessage(projectId, messageId) 
+      projectMessages.value = projectMessages.value.filter((m) => m.id !== messageId)
+    } catch (err: unknown) {
+      error.value = err instanceof Error ? err.message : 'Failed to delete project message'
+      throw err
+    } finally {
+      loading.value = false
+    }
+  }
+
+
 
   return {
     projects,
@@ -293,5 +308,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     getArticleVoiceLink,
     getProjectContainerConfigs,
     saveProjectContainerConfigs,
+    startContainer,
+    deleteProjectMessage,
   }
 })

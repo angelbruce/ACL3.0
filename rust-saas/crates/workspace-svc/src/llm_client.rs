@@ -1,12 +1,26 @@
+// 该文件是从 llm-svc/src/client.rs 复制过来的逻辑，
+// 避免修改 llm-svc 已有的代码。
+// 这里将 LlmClient、ToolExecutor、StreamResponse 等类型复制到 workspace-svc，
+// 以便在容器部署流程中直接调用 LLM 并执行 MCP 工具。
+
 use futures::{Stream, StreamExt};
 use reqwest::{Client, RequestBuilder};
 use serde::{Deserialize, Serialize};
+use serde_json::Map;
 use std::collections::HashMap;
 use std::pin::Pin;
 use shared::errors::{ServiceError, ServiceResult};
-use shared::models::{MCPTool, LlmTool, LlmToolFunction, ToolCallInfo, ToolCallFunction};
-use crate::handlers::ChatResponse;
+use shared::models::{MCPTool, LlmTool, LlmToolFunction, ToolCallInfo, ToolCallFunction, ChatMessage};
+use crate::model::UserSession;
 
+/// 工具执行结果（与 llm-svc 保持一致）
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ChatResponse {
+    pub content: String,
+    pub tool_calls: Option<Vec<ToolCallInfo>>,
+}
+
+/// ToolExecutor：负责将 LLM 返回的工具调用转发到对应的 MCP-SERVER
 pub struct ToolExecutor {
     servers: HashMap<i64, String>,
     default_server_url: String,
@@ -43,7 +57,7 @@ impl ToolExecutor {
                 "arguments": arguments.clone(),
             },
         });
-      
+
         let response = self.client
             .post(&url)
             .json(&request)
@@ -70,7 +84,6 @@ impl ToolExecutor {
                 }
                 if let Ok(value) = serde_json::from_str::<serde_json::Value>(data) {
                     // 从 MCP JSON-RPC 响应中提取 content
-                    // 格式: {"result": {"content": [{"type":"text","text":"..."}]}}
                     if let Some(result) = value.get("result") {
                         if let Some(content_list) = result.get("content") {
                             if let Some(arr) = content_list.as_array() {
@@ -84,7 +97,6 @@ impl ToolExecutor {
                                 }
                             }
                         }
-                        // 检查是否有 error
                         if let Some(error) = result.get("isError") {
                             if error.as_bool() == Some(true) {
                                 return Err(ServiceError::McpError(
@@ -93,7 +105,6 @@ impl ToolExecutor {
                             }
                         }
                     }
-                    // 也检查顶层 error
                     if let Some(err) = value.get("error") {
                         let err_msg = err.get("message")
                             .and_then(|m| m.as_str())
@@ -108,6 +119,82 @@ impl ToolExecutor {
             content = "Tool execution completed".to_string();
         }
         Ok(content)
+    }
+
+    /// 从 MCP-SSE 服务获取工具列表
+    pub async fn list_tools(&self, server_id: Option<i64>) -> ServiceResult<Vec<MCPTool>> {
+        let server_url = self.get_server_url(server_id);
+        let request = serde_json::json!({
+            "id": 1,
+            "method": "tools/list",
+            "jsonrpc": "2.0",
+        });
+
+        let response = self.client
+            .post(&server_url)
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| ServiceError::McpError(e.to_string()))?;
+
+        let body_bytes = response.bytes()
+            .await
+            .map_err(|e| ServiceError::McpError(e.to_string()))?;
+        let body_str = String::from_utf8_lossy(&body_bytes);
+
+        println!("[ListTools] Raw response body: {}", body_str);
+
+        // 解析 SSE 格式响应
+        let mut tools: Vec<MCPTool> = Vec::new();
+        for line in body_str.lines() {
+            let trimmed = line.trim();
+            if let Some(data) = trimmed.strip_prefix("data: ") {
+                if data == "[DONE]" {
+                    continue;
+                }
+                if let Ok(value) = serde_json::from_str::<serde_json::Value>(data) {
+                    if let Some(result) = value.get("result") {
+                        if let Some(tool_list) = result.get("tools") {
+                            if let Some(arr) = tool_list.as_array() {
+                                for tool_item in arr {
+                                    let name = tool_item.get("name")
+                                        .and_then(|n| n.as_str())
+                                        .unwrap_or("unknown")
+                                        .to_string();
+                                    let description = tool_item.get("description")
+                                        .and_then(|d| d.as_str())
+                                        .unwrap_or("")
+                                        .to_string();
+                                    let input_schema = tool_item.get("inputSchema")
+                                        .cloned()
+                                        .unwrap_or_else(|| serde_json::json!({}));
+                                    let output_schema = tool_item.get("outputSchema")
+                                        .cloned()
+                                        .unwrap_or_else(|| serde_json::json!({}));
+                                    
+                                    tools.push(MCPTool {
+                                        name,
+                                        description,
+                                        input_schema,
+                                        output_schema,
+                                        server_id,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    if let Some(err) = value.get("error") {
+                        let err_msg = err.get("message")
+                            .and_then(|m| m.as_str())
+                            .unwrap_or("Unknown error");
+                        return Err(ServiceError::McpError(err_msg.to_string()));
+                    }
+                }
+            }
+        }
+
+        println!("[ListTools] Found {} tools", tools.len());
+        Ok(tools)
     }
 }
 
@@ -135,7 +222,7 @@ impl LlmClient {
         }
     }
 
-    pub async fn chat(&self, messages: &[shared::models::ChatMessage], tools: Option<&[MCPTool]>) -> ServiceResult<ChatResponse> {
+    pub async fn chat(&self, messages: &[ChatMessage], tools: Option<&[MCPTool]>) -> ServiceResult<ChatResponse> {
         let llm_tools = tools.map(|mcp_tools| {
             mcp_tools.iter().map(|tool| LlmTool {
                 r#type: "function".to_string(),
@@ -146,12 +233,11 @@ impl LlmClient {
                 },
             }).collect::<Vec<LlmTool>>()
         });
-       
 
         let body = ChatCompletionRequest {
             model: self.model_name.clone(),
             messages: messages.iter().cloned().collect(),
-            tools: llm_tools.clone(),
+            tools: llm_tools,
             stream: Some(false),
             max_tokens: Some(4096),
             temperature: Some(0.7),
@@ -176,7 +262,7 @@ impl LlmClient {
         })
     }
 
-    pub async fn chat_stream(&self, messages: &[shared::models::ChatMessage], tools: Option<&[MCPTool]>) -> ServiceResult<impl Stream<Item = StreamResponse>> {
+    pub async fn chat_stream(&self, messages: &[ChatMessage], tools: Option<&[MCPTool]>) -> ServiceResult<impl Stream<Item = StreamResponse>> {
         let llm_tools = tools.map(|mcp_tools| {
             mcp_tools.iter().map(|tool| LlmTool {
                 r#type: "function".to_string(),
@@ -188,7 +274,9 @@ impl LlmClient {
             }).collect::<Vec<LlmTool>>()
         });
 
-        let messages: Vec<shared::models::ChatMessage> = messages.iter().filter(|d| {
+        println!("tools: {:?}", llm_tools.clone());
+
+        let messages: Vec<ChatMessage> = messages.iter().filter(|d| {
             match d.content {
                 Some(ref c) => !c.is_empty(),
                 None => false,
@@ -198,7 +286,7 @@ impl LlmClient {
         let body = ChatCompletionRequest {
             model: self.model_name.clone(),
             messages: messages.iter().cloned().collect(),
-            tools: Some(Vec::new()), // 即使没有工具，也要传空数组，确保 LLM 端正确识别
+            tools: Some(Vec::new()),
             stream: Some(true),
             max_tokens: Some(4096),
             temperature: Some(0.3),
@@ -216,10 +304,11 @@ impl LlmClient {
                     Ok(bytes) => {
                         let lines = String::from_utf8_lossy(bytes.as_ref());
                         let mut responses = Vec::new();
-                        
+
                         for line in lines.lines() {
                             let line = line.trim();
                             if line.starts_with("data: ") {
+                                println!("data: {}", line);
                                 let json_str = line.strip_prefix("data: ").unwrap_or(line);
                                 if json_str == "[DONE]" {
                                     responses.push(StreamResponse {
@@ -243,7 +332,7 @@ impl LlmClient {
                                 }
                             }
                         }
-                        
+
                         futures::stream::iter(responses)
                     }
                     Err(_) => futures::stream::iter(Vec::new()),
@@ -255,12 +344,15 @@ impl LlmClient {
 
     /// 完整的工具调用循环：流式响应 -> 累积工具调用 -> 执行工具 -> 继续对话
     pub async fn chat_with_tools(
-        &self, 
-        messages: Vec<shared::models::ChatMessage>, 
+        &self,
+        messages: Vec<ChatMessage>,
         tools: Option<&[MCPTool]>,
         mcp_servers: HashMap<i64, String>,
         mcp_default_url: &str,
         max_tool_calls: usize,
+        user_id: i64,
+        project_id: i64,
+        config_id: Option<i64>,
     ) -> ServiceResult<Pin<Box<dyn Stream<Item = StreamResponse> + Send>>> {
         let mut all_messages = messages;
         let mut tool_call_count = 0;
@@ -268,10 +360,8 @@ impl LlmClient {
         let api_key = self.api_key.clone();
         let model_name = self.model_name.clone();
 
-        // 创建ToolExecutor
         let tool_executor = ToolExecutor::new(mcp_servers, mcp_default_url);
-        
-        // 创建工具名称到 server_id 的映射
+
         let tool_server_map: HashMap<String, Option<i64>> = tools
             .map(|ts| {
                 ts.iter()
@@ -280,8 +370,7 @@ impl LlmClient {
             })
             .unwrap_or_default();
 
-        // 辅助函数：发送请求并处理响应
-        let send_request = |client: &LlmClient, msgs: &[shared::models::ChatMessage], tool_opts: Option<&[MCPTool]>| {
+        let send_request = |client: &LlmClient, msgs: &[ChatMessage], tool_opts: Option<&[MCPTool]>| {
             let llm_tools = tool_opts.map(|mcp_tools| {
                 mcp_tools.iter().map(|tool| {
                     LlmTool {
@@ -309,12 +398,9 @@ impl LlmClient {
                 .send()
         };
 
-        // 累积所有内容（跨多次工具调用）
         let mut accumulated_content = String::new();
 
-        // 循环处理工具调用
         loop {
-            // 检查是否超过最大工具调用次数
             if tool_call_count >= max_tool_calls {
                 let stream = Box::pin(futures::stream::once(async move {
                     Ok::<_, ServiceError>(StreamResponse {
@@ -326,18 +412,17 @@ impl LlmClient {
                 return Ok(stream);
             }
 
-            // 发送请求
             let response = send_request(self, &all_messages, tools.map(|t| &*t))
                 .await
                 .map_err(|e| ServiceError::LlmError(e.to_string()))?;
 
             let mut stream = response.bytes_stream();
             let mut current_content = String::new();
+            let mut reasoning_content = String::new();
             let mut accumulated_tool_calls: Vec<ToolCallInfo> = Vec::new();
             let mut finish_reason: Option<String> = None;
             let mut has_tool_call_chunk = false;
 
-            // 接收流式响应
             while let Some(result) = stream.next().await {
                 let bytes = result.map_err(|e| ServiceError::LlmError(e.to_string()))?;
                 let lines = String::from_utf8_lossy(bytes.as_ref());
@@ -351,19 +436,18 @@ impl LlmClient {
                             break;
                         } else if let Ok(chunk) = serde_json::from_str::<StreamChunk>(json_str) {
                             if let Some(choice) = chunk.choices.first() {
-                                // 累积当前响应块的内容
                                 if let Some(ref content) = choice.delta.content {
                                     current_content.push_str(content);
                                 }
                                 if let Some(ref reasoning) = choice.delta.reasoning_content {
-                                    current_content.push_str(reasoning);
+                                    current_content.push_str(reasoning.as_str().clone());
+                                    reasoning_content.push_str(reasoning.as_str().clone());
                                 }
-                                
-                                // 累积工具调用
+
                                 if let Some(ref tool_calls) = choice.delta.tool_calls {
                                     for tc in tool_calls {
                                         let idx = tc.index.unwrap_or(0) as usize;
-                                        
+
                                         if idx >= accumulated_tool_calls.len() {
                                             accumulated_tool_calls.push(ToolCallInfo {
                                                 id: None,
@@ -377,12 +461,11 @@ impl LlmClient {
                                                 index: Some(idx as i32),
                                             });
                                         }
-                                        
-                                        // 更新工具调用信息
+
+
                                         if !tc.id.is_none() {
                                             accumulated_tool_calls[idx].id = tc.id.clone();
                                         }
-                                        // 设置 tool_type，默认为 "function"
                                         if let Some(ref tt) = tc.tool_type {
                                             if !tt.is_empty() {
                                                 accumulated_tool_calls[idx].tool_type = Some(tt.clone());
@@ -390,9 +473,8 @@ impl LlmClient {
                                         } else {
                                             accumulated_tool_calls[idx].tool_type = Some("function".to_string());
                                         }
-                                        // 更新 function 字段
+
                                         if let Some(ref func) = tc.function {
-                                            // 更新 name
                                             if let Some(ref name) = func.name {
                                                 if !name.is_empty() {
                                                     if let Some(ref mut f) = accumulated_tool_calls[idx].function {
@@ -400,23 +482,21 @@ impl LlmClient {
                                                     }
                                                 }
                                             }
-                                            // 累积 arguments
                                             if let Some(ref args) = func.arguments {
                                                 if !args.is_empty() {
                                                     if let Some(ref mut f) = accumulated_tool_calls[idx].function {
                                                         let before = f.arguments.clone().unwrap_or_default();
                                                         f.arguments = Some(format!("{}{}", before, args));
+                                                        // println!("-- args: {}", f.arguments.clone().unwrap_or_default());
                                                     }
                                                 }
                                             }
                                         }
-                                        
-                                        // 同时检查并累积顶层的 arguments 字段（以防万一）
+
                                         if let Some(ref args) = tc.arguments {
                                             let args_str = args.to_string();
                                             if !args_str.is_empty() {
                                                 if let Some(ref mut f) = accumulated_tool_calls[idx].function {
-                                                    // 如果 function.arguments 是空的，才使用顶层的 arguments
                                                     if f.arguments.clone().unwrap_or_default().is_empty() {
                                                         f.arguments = Some(args_str);
                                                     }
@@ -426,8 +506,7 @@ impl LlmClient {
                                     }
                                     has_tool_call_chunk = true;
                                 }
-                                
-                                // 获取finish_reason
+
                                 if let Some(ref reason) = choice.finish_reason {
                                     if reason == "tool_calls" {
                                         finish_reason = Some(reason.clone());
@@ -439,20 +518,16 @@ impl LlmClient {
                 }
             }
 
-            // 检查是否有工具调用（检查 function.name 或 name 字段）
-            let has_tool_calls = has_tool_call_chunk && 
+            let has_tool_calls = has_tool_call_chunk &&
                 accumulated_tool_calls.iter().any(|tc| {
-                    // 检查 function.name 是否有值
                     tc.function.as_ref()
                         .and_then(|f| f.name.as_ref())
                         .map(|n| !n.is_empty())
                         .unwrap_or(false) ||
-                    // 或者检查 name 字段是否有值
                     tc.name.as_ref().map(|n| !n.is_empty()).unwrap_or(false)
                 });
 
             if !has_tool_calls {
-                // 没有工具调用，累积内容并返回最终结果
                 accumulated_content.push_str(&current_content);
                 let stream = Box::pin(futures::stream::once(async move {
                     Ok::<_, ServiceError>(StreamResponse {
@@ -464,11 +539,9 @@ impl LlmClient {
                 return Ok(stream);
             }
 
-            // 有工具调用，累积当前内容
             accumulated_content.push_str(&current_content);
             tool_call_count += 1;
-            
-            // 确保所有 tool_call 的 arguments 不为空
+
             for tc in &mut accumulated_tool_calls {
                 if let Some(ref mut f) = tc.function {
                     if f.arguments.clone().unwrap_or_default().is_empty() {
@@ -476,9 +549,8 @@ impl LlmClient {
                     }
                 }
             }
-            
-            // 添加工具调用消息到历史
-            all_messages.push(shared::models::ChatMessage {
+
+            all_messages.push(ChatMessage {
                 role: "assistant".to_string(),
                 content: Some(current_content),
                 tool_calls: Some(accumulated_tool_calls.clone()),
@@ -486,33 +558,26 @@ impl LlmClient {
                 name: None,
             });
 
-            // 执行工具调用
             for tool_call in &accumulated_tool_calls {
-                // 获取工具名称：优先使用 function.name，否则使用 name 字段
                 let tool_name = tool_call.function.as_ref()
                     .and_then(|f| f.name.clone())
                     .filter(|n| !n.is_empty())
                     .or_else(|| tool_call.name.clone())
                     .unwrap_or_default();
-                
-                // 获取工具参数：优先使用 function.arguments（累积的字符串），否则使用顶层的 arguments
+
                 let func_args_str = tool_call.function.as_ref()
                     .and_then(|f| f.arguments.clone())
                     .unwrap_or_default();
                 println!("[ExecuteTool] name={}, func.arguments='{:?}'", tool_name, func_args_str);
-                
+
                 let tool_args = if !func_args_str.is_empty() {
-                    // 尝试解析字符串为 JSON
                     let trimmed = func_args_str.trim();
-                    // 首先尝试直接解析为 JSON 值
                     if let Ok(value) = serde_json::from_str(trimmed) {
                         println!("[ExecuteTool] Direct parse succeeded");
                         value
                     } else {
-                        // 如果失败，尝试先解析为 JSON 字符串（处理被引号包裹的情况）
                         if let Ok(inner_str) = serde_json::from_str::<String>(trimmed) {
                             println!("[ExecuteTool] Parsed as string first, inner value: '{}'", inner_str);
-                            // 然后再解析内部字符串为 JSON
                             serde_json::from_str(&inner_str).unwrap_or_else(|e| {
                                 println!("[ExecuteTool] Failed to parse inner string as JSON: {}, using empty object", e);
                                 serde_json::json!({})
@@ -533,11 +598,24 @@ impl LlmClient {
                     continue;
                 }
 
-                // 根据工具名称查找对应的 server_id
+
+                let mut tool_args = tool_args.clone();
+                println!("[ExecuteTool] original arguments: {:?}", tool_args.clone());
+                let mut user_session = UserSession::new(user_id,project_id,(if let Some(config_id) = config_id { config_id } else { 0 }));
+                if(tool_name.contains("question") || tool_name.contains("task")) {
+                    let mut data =  tool_args.as_object_mut().unwrap();
+                    let mut session = Map::new();
+                    session.insert("session".to_string(), serde_json::json!(user_session));
+                    data.append( &mut session);
+                    tool_args = serde_json::json!(data);
+               
+                    println!("[ExecuteTool] merged arguments: {:?}", tool_args);
+                }
+
                 let server_id = tool_server_map.get(&tool_name).copied().flatten();
-                
+
                 let result = tool_executor.execute_tool(&tool_name, &tool_args, server_id).await;
-                
+
                 let tool_result = match result {
                     Ok(content) => serde_json::json!({
                         "success": true,
@@ -550,10 +628,10 @@ impl LlmClient {
                     }).to_string(),
                 };
 
-                all_messages.push(shared::models::ChatMessage {
+                all_messages.push(ChatMessage {
                     role: "tool".to_string(),
                     content: Some(tool_result),
-                    tool_call_id: Some(tool_call.id.clone()),
+                    tool_call_id: tool_call.id.clone(),
                     name: Some(tool_name),
                     tool_calls: None,
                 });
@@ -571,7 +649,7 @@ impl LlmClient {
 #[derive(Debug, Serialize)]
 struct ChatCompletionRequest {
     model: String,
-    messages: Vec<shared::models::ChatMessage>,
+    messages: Vec<ChatMessage>,
     tools: Option<Vec<LlmTool>>,
     stream: Option<bool>,
     max_tokens: Option<i32>,

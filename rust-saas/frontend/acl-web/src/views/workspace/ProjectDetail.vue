@@ -2,10 +2,7 @@
 import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, Send, Loader2, Bot, User, Wrench, Copy, Check, ChevronDown, Settings, Brain, FileText, Plus, 
-  Trash2, X, Save,Play, FolderCheck, FileArchiveIcon, FileCode, 
-  Train,
-  TrainIcon,
-  FileOutput,
+  Trash2,  Save,Play, FolderCheck, FileCode, 
   LucideFolderOutput,
   ComponentIcon,
   CheckCircle2} from 'lucide-vue-next'
@@ -57,6 +54,15 @@ const scrollToBottom = () => {
     }
   })
 }
+
+const deleteMessage = (message: ProjectChatMessage) => {
+  workspaceStore.deleteProjectMessage(projectId.value, message.id).then(() => {
+    workspaceStore.fetchProjectMessages(projectId.value)
+    scrollToBottom()
+  })
+}
+
+
 
 const getMessageIcon = (role: string) => {
   switch (role) {
@@ -185,7 +191,6 @@ const createFileTree = (files: ProjectFile[]) : Tree[]  => {
     }
   }
 
-  console.log('123',tree)
    return [tree]
 }
 
@@ -238,6 +243,14 @@ const copyMessage = async (message: ProjectChatMessage) => {
   copiedId.value = message.id
   setTimeout(() => { copiedId.value = null }, 2000)
 }
+
+const planing = ref(false);
+const getBtnText = computed(()=>{
+  if(planing.value) {
+    return '规划中'
+  }
+   sending.value ? '发送中' : '发送'
+})
 
 const selectModel = async (model: LlmModel) => { 
   selectedModel.value = model
@@ -308,18 +321,21 @@ const sendMessage = async () => {
     })
 
     const agentId = selectedAgent.value?.id
+    const configId = currentContainerConfigId.value || 0
 
     var cacheData = '';
     var refreshCount = 100;
-    await llmService.chatStream(
+    
+    // 使用 workspace 专用的 chat/stream 接口
+    await workspaceService.workspaceChatStream(
       { 
         model_id: selectedModel.value.id, 
-        messages: chatMessages, 
-        agent_id: agentId, 
-        stream: true,
-        project_id: projectId.value
+        agent_id: agentId,
+        project_id: projectId.value,
+        config_id: configId,
+        messages: chatMessages,
       },
-      (data: StreamResponse) => { 
+      (data: { content: string; tool_calls?: unknown; finish_reason?: string }) => { 
         cacheData += data.content
         refreshCount--
         if(refreshCount <= 0) {
@@ -342,10 +358,23 @@ const sendMessage = async () => {
       const files = extractNovelContent(streamingContent.value)
       if (files.length > 0) {
         for(let file of files) {
-          var filename = file.fileName || new Date().toLocaleString()
-          const newFile = await workspaceStore.createProjectFile(projectId.value, filename)
-          await saveFileAndContent(newFile.id, file.content)
+          var filename = file.fileName || null//new Date().toLocaleString()
+          if(!filename) continue;
+          
+          console.log(filename,workspaceStore.projectFiles)
+          // 检查文件名是否已存在
+          const existingFile = workspaceStore.projectFiles.find(f => ((f.directory && f.directory.length >0) ? (f.directory + '/' + f.name)  : f.name) === filename)
+          if (existingFile) {
+            // 文件已存在，更新内容
+            await saveFileAndContent(existingFile.id, file.content)
+          } else {
+            // 文件不存在，创建新文件
+            const newFile = await workspaceStore.createProjectFile(projectId.value, filename)
+            await saveFileAndContent(newFile.id, file.content)
+          }
         }
+      
+        await planActions();
       }
     }
   } catch (error) {
@@ -359,20 +388,106 @@ const sendMessage = async () => {
   if(projectFiles.value.length > 0){
     selectedFile.value = projectFiles.value[0]
   } 
+}
 
+const planActions = async() => {
+  next_step().then(data => {
+      console.log('data',data)
+      let result = data?.trim() || '';
+      let idx = result.indexOf(' ');
+      let type = '';
+      let prompt = null;
+      if(idx !== -1) {
+        var array = result.split(' ');
+        type = array[0];
+        if(array.length>1)  {
+          prompt = array[1];
+          if(prompt.trim().length == 0) {
+            prompt = null;
+          }
+        }
+      } else {
+        type = result;
+      }
+
+      switch(type) {
+        case "1": {
+          if(prompt == null) prompt = '请执行'
+          inputMessage.value = prompt
+          sendMessage()
+          break;
+        }
+        case "2": {
+            processCommand(prompt)
+          break;
+        }
+        case "3": {
+          break;
+        }
+        case "3": return;
+        default: return;
+      }
+      
+    })
 }
 
 const saveFileAndContent = async (id:any,content: string) => {
   try {
     await workspaceStore.updateProjectFile(id, content)
+   
+    await refreshFileContent(id,content);
+    
   } catch (err) {
     loadError.value = err instanceof Error ? err.message : '保存文件失败'
+  }
+}
+
+const refreshFileContent = async(id:any,content: string) => {
+  const configId = projectContainerConfigRef.value?.activeTab
+  if (configId) {
+    const statusResponse = await workspaceService.getContainerStatus(projectId.value, configId)
+    const isRunning = statusResponse.target_status 
+      ? statusResponse.target_status.state?.toLowerCase() === 'running' || statusResponse.target_status.state?.toLowerCase() === 'up'
+      : statusResponse.statuses.some((s: any) => s.state?.toLowerCase() === 'running' || s.state?.toLowerCase() === 'up')
+    if (isRunning) {
+      const configs = await workspaceStore.getProjectContainerConfigs(projectId.value)
+      const config = configs?.find((c: any) => c.id === configId)
+      const command = (config?.command || '')
+      await workspaceService.refreshFileToContainer(projectId.value, {
+        file_id: id,
+        config_id: configId,
+        content: content,
+        command: ''
+      })
+      console.log('[saveFileAndContent] File synced to container:', id)
+      console.log('[saveFileAndContent] Executing command in terminal:', command)
+    }
+  }
+}
+const processCommand = async(cmd:string|null) => {
+  const configId = projectContainerConfigRef.value?.activeTab
+  if (configId) {
+    const statusResponse = await workspaceService.getContainerStatus(projectId.value, configId)
+    const isRunning = statusResponse.target_status 
+      ? statusResponse.target_status.state?.toLowerCase() === 'running' || statusResponse.target_status.state?.toLowerCase() === 'up'
+      : statusResponse.statuses.some((s: any) => s.state?.toLowerCase() === 'running' || s.state?.toLowerCase() === 'up')
+    if (isRunning) {
+      // 获取配置中的 command
+      const configs = await workspaceStore.getProjectContainerConfigs(projectId.value)
+      const config = configs?.find((c: any) => c.id === configId)
+      const command = cmd || (config?.command || '')
+      
+      if (command) {
+        projectContainerConfigRef.value?.executeCommand(configId, command)
+      }
+    }
   }
 }
 
 const formatTime = (dateStr: string) => new Date(dateStr).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
 
 const selectFile = async (file: ProjectFile) => {
+  if(!file) return;
   selectedFile.value = file
   fileContent.value = file.content || ''
   editingFile.value = true
@@ -429,9 +544,198 @@ const saveFile = async () => {
         summary: summaryContent
       })
     }
+    
+    // 保存成功后，检查容器是否存活，如果存活则刷新文件并执行 command
+    await refreshContainerAndExecute()
   } catch (err) {
     loadError.value = err instanceof Error ? err.message : '保存文件失败'
   }
+}
+
+// 刷新容器文件并执行 command
+const refreshContainerAndExecute = async () => {
+  console.log('[refreshContainerAndExecute] Starting...')
+  
+  // 获取当前选中的 config_id（从 ProjectContainerConfig 组件）
+  const configId = projectContainerConfigRef.value?.activeTab
+  console.log('[refreshContainerAndExecute] Current configId:', configId)
+  
+  if (!configId) {
+    console.log('[refreshContainerAndExecute] No config selected')
+    return
+  }
+  
+  try {
+    // 1. 获取项目的所有容器配置
+    const configs = await workspaceStore.getProjectContainerConfigs(projectId.value)
+    console.log('[refreshContainerAndExecute] Configs:', configs)
+    
+    if (!configs || configs.length === 0) {
+      console.log('[refreshContainerAndExecute] No container configs found')
+      return
+    }
+    
+    // 2. 找到当前选中的配置
+    const config = configs.find((c: any) => c.id === configId)
+    if (!config) {
+      console.log('[refreshContainerAndExecute] Config not found for id:', configId)
+      return
+    }
+    
+    const command = config.command || ''
+    if (!command) {
+      console.log('[refreshContainerAndExecute] No command configured')
+      return
+    }
+    
+    // 3. 检查容器是否运行
+    const statusResponse = await workspaceService.getContainerStatus(projectId.value, configId)
+    console.log('[refreshContainerAndExecute] Container status:', statusResponse)
+    
+    const isRunning = statusResponse.target_status 
+      ? statusResponse.target_status.state?.toLowerCase() === 'running' || statusResponse.target_status.state?.toLowerCase() === 'up'
+      : statusResponse.statuses.some((s: any) => s.state?.toLowerCase() === 'running' || s.state?.toLowerCase() === 'up')
+    
+    if (!isRunning) {
+      console.log('[refreshContainerAndExecute] Container is not running')
+      return
+    }
+    
+    // 4. 刷新文件到容器
+    console.log('[refreshContainerAndExecute] Refreshing file to container...')
+    if (selectedFile.value) {
+      await workspaceService.refreshFileToContainer(projectId.value, {
+        file_id: selectedFile.value.id,
+        config_id: configId,
+        content: fileContent.value || '',
+        command: ''
+      })
+      console.log('[refreshContainerAndExecute] File refreshed to container')
+    }
+    
+    // 5. 在前端终端中执行 command（关键修改：在终端中显示执行结果）
+    console.log('[refreshContainerAndExecute] Executing command in terminal:', command)
+    projectContainerConfigRef.value?.executeCommand(configId, command)
+  } catch (err) {
+    console.error('[refreshContainerAndExecute] Error:', err)
+  }
+}
+
+// 当前容器的 config_id（需要在 ProjectContainerConfig 中设置）
+const currentContainerConfigId = ref<number | null>(null)
+const projectContainerConfigRef = ref<InstanceType<typeof import('@/views/workspace/ProjectContainerConfig.vue').default> | null>(null)
+
+// 设置当前容器 config_id（供 ProjectContainerConfig 调用）
+const setCurrentContainerConfigId = (configId: number) => {
+  currentContainerConfigId.value = configId
+}
+
+// 处理容器配置就绪
+const handleConfigReady = (configId: number) => {
+  currentContainerConfigId.value = configId
+}
+
+// 暴露给子组件
+defineExpose({
+  setCurrentContainerConfigId
+})
+
+const next_step = async (): Promise<string | null> => {
+    if (!selectedModel.value) {
+      return null
+    }
+
+    planing.value = true;
+    sending.value = true;
+    inputMessage.value = '规划中..'
+
+    const chatMessages: any[] = [];
+
+    
+    for(let msg of projectMessages.value) {
+      if(!msg.content || !msg.role) continue;
+      if(msg.role && msg.role === 'system' ) continue;
+      if(msg.content && msg.content === '请你执行。') continue;
+      if(msg.content && msg.content.startsWith('错误: ')) continue;
+      chatMessages.push({
+        role: msg.role,
+        content: msg.content,
+      })
+    }
+
+   chatMessages.push({
+        role: 'system',
+        content: `[角色]：你是一个任务规划师，根据任务描述，规划出下一步。请根据规划结果，返回规划结果。规划结果必须以数字1、2、3开头。` 
+          + "[输出格式]: ``` next  [next_step_sequence_no command|prompt]  ``` "
+          + "[输出约束]: 你只能输出一个结果，不能输出多个结果。 "
+    });
+  
+    chatMessages.push({
+        role: 'system',
+        content: `[任务目标]：必须完成编写创作：编写${project.value?.name || ''}:${project.value?.description || ''}`
+    });
+
+    let max = 10;
+    if(chatMessages.length > max + 2) {
+      let spliceCount = chatMessages.length - max - 2;
+      chatMessages.splice(0, spliceCount)
+    }
+
+    try {
+      const summaryPrompt = `必须从当前会话规划出下一步， 1 继续执行任务 2 在控制台执行指令<command> 3 退出任务 ，请根据当前会话内容，规划出下一步。`
+      chatMessages.push({
+          role: 'user',
+          content: summaryPrompt
+      });
+
+      return new Promise((resolve) => {
+        let summaryContent = ''
+        
+        llmService.chatStream(
+          {
+            model_id: selectedModel?.value?.id || 0,
+            messages: chatMessages,
+            stream: true,
+            project_id: projectId.value
+          },
+          (data: StreamResponse) => {
+            summaryContent += data.content
+          },
+          (error: Error) => {
+            planing.value = false;
+            sending.value = false;
+            inputMessage.value = '请执行。'
+            console.error('[ERROR] Planing error:', error)
+            resolve(null)
+          }
+        ).then(() => {
+          planing.value = false;
+          sending.value = false;
+          inputMessage.value = '请执行。'
+          if (summaryContent.trim().length > 0) {
+            const patternRegex = /```\s*[\w]{3,}\s+([\s\S]*?)```/g
+            const matches = [...summaryContent.matchAll(patternRegex)]
+            console.log(matches)
+            let data = matches.length> 0 ? matches[0][1] : '';
+            console.log(data)
+            resolve(data)
+          } else {
+            resolve(null)
+          }
+        }).catch(() => {
+          planing.value = false;
+          sending.value = false;
+          inputMessage.value = '请执行。'
+          resolve(null)
+        })
+      })
+    } catch (error) {
+      planing.value = false;
+      sending.value = false;
+      inputMessage.value = '请执行。'
+      console.error('[ERROR] Planing error:', error)
+      return null
+    }
 }
 
 const generateSummary = async (content: string): Promise<string | null> => {
@@ -552,18 +856,29 @@ onMounted(async () => {
 
 
 const debugCode = ()=> {
-  if (!selectedFile.value) {
-    loadError.value = '请先选择文件'
-    return
-  }
+  debugVisible.value = ! debugVisible.value
+}
 
-  debugVisible.value = true
+// 处理容器命令执行错误
+const handleCommandError = (error: string) => {
+  console.log('Command error received:', error)
+  // 将错误信息设置到 inputMessage
+  inputMessage.value = `错误: ${error}`
+  
+  // 延迟一点时间，确保界面更新，然后自动点击"开始"按钮
+  nextTick(() => {
+    // 找到"开始"按钮并触发点击
+    const startButton = document.querySelector('button[type="submit"]') as HTMLButtonElement
+    if (startButton && !startButton.disabled) {
+      startButton.click()
+    }
+  })
 }
 
 let debugVisible = ref(false)
 </script>
 
-<template>
+<template class="w-full h-full">
   <div class="flex h-full overflow-hidden">
     <div class="w-64 bg-white border-r border-surface-200 flex flex-col flex-shrink-0">
       <div class="p-4 border-b border-surface-200">
@@ -684,7 +999,7 @@ let debugVisible = ref(false)
           <div class="p-2 bg-white border-t border-surface-200 flex-shrink-0">
             <form @submit.prevent="sendMessage" class="flex flex-col gap-2">
               <textarea
-                v-model="inputMessage"
+                v-model="inputMessage" :readonly="sending"
                 class="w-full px-3 py-2 bg-surface-100 border border-surface-200 rounded-lg  text-sm text-surface-600"
               />
               
@@ -695,7 +1010,7 @@ let debugVisible = ref(false)
               >
                 <Loader2 v-if="sending" class="w-4 h-4 animate-spin" />
                 <Send v-else class="w-4 h-4" />
-                <span>{{ sending ? '运行中...' : '开始' }}</span>
+                <span>{{ getBtnText }}</span>
               </button>
             </form>
           </div>
@@ -725,22 +1040,22 @@ let debugVisible = ref(false)
 
             <audio ref="audioRef" v-if="project && project?.purpose == 'article' && playing" controls></audio>
 
-            <button class="bg-surface-50 border px-4 py-2 border-surface-200 rounded-lg hover:bg-surface-100 transition-colors text-sm text-surface-600 flex items-center gap-2">
+            <button class="bg-surface-50 border px-2 py-2 border-surface-200 rounded-lg hover:bg-surface-100 transition-colors text-sm text-surface-600 flex items-center gap-2">
              <LucideFolderOutput class="w-4 h-4" /> <span>导出</span>
             </button>
 
-            <button class="bg-surface-50 border px-4 py-2 border-surface-200 rounded-lg hover:bg-surface-100 transition-colors text-sm text-surface-600 flex items-center gap-2"
+            <button class="bg-surface-50 border px-2 py-2 border-surface-200 rounded-lg hover:bg-surface-100 transition-colors text-sm text-surface-600 flex items-center gap-2"
              v-if="project && project?.purpose === 'coding'"
              @click="debugCode"
              >
              <ComponentIcon class="w-4 h-4" /> <span>调试</span>
             </button>
         
-            <button class="bg-surface-50 border px-4 py-2 border-surface-200 rounded-lg hover:bg-surface-100 transition-colors text-sm text-surface-600 flex items-center gap-2"
+            <button class="bg-surface-50 border px-2 py-2 border-surface-200 rounded-lg hover:bg-surface-100 transition-colors text-sm text-surface-600 flex items-center gap-2"
              v-if="project && project?.purpose === 'coding'" 
              @click="showHistory = !showHistory"
              >
-             <CheckCircle2 class="w-4 h-4" /> <span>交互记录</span>
+             <CheckCircle2 class="w-4 h-4" /> <span>交互</span>
             </button>
           </div>
         </div>
@@ -774,7 +1089,7 @@ let debugVisible = ref(false)
       </div>
 
       <div class="flex-1 flex overflow-hidden">
-        <div class="flex-1 flex flex-col bg-white border-r border-surface-200 overflow-hidden">
+        <div class="flex-1 flex flex-row bg-white border-r border-surface-200 overflow-hidden">
           <div class="flex-1 overflow-hidden p-3">
               <highlightjs 
               class="h-full resize-none border-none outline-none 
@@ -787,33 +1102,47 @@ let debugVisible = ref(false)
               :code="fileContent" 
               autodetect />
           </div>
+          <div v-if="debugVisible"  class="flex w-3/4  overflow-auto border border-surface-200 rounded-sm p-4" >
+            <ProjectContainerConfig 
+              ref="projectContainerConfigRef"
+              :project="project"
+              :messages="projectMessages"
+              @command-error="handleCommandError"
+              @config-ready="handleConfigReady"
+            />
+          </div>
         </div>
 
-        <div class="w-80 flex flex-col bg-surface-50 flex-shrink-0" v-if="showHistory">
+        <div class="w-80 flex flex-col bg-surface-50 flex-shrink-0 overflow-hidden" v-if="showHistory">
           <div ref="messagesContainer" class="flex-1 overflow-y-auto p-2 space-y-2">
             <div v-if="loading" class="flex items-center justify-center h-full">
               <Loader2 class="w-6 h-6 animate-spin text-primary-500" />
             </div>
-
-            <div v-else-if="loadError" class="flex flex-col items-center justify-center h-full text-center">
+            <!-- <div v-else-if="loadError" class="flex flex-col items-center justify-center h-full text-center">
               <p class="text-red-500 mb-4 text-sm">{{ loadError }}</p>
               <button @click="router.push('/workspace')" class="btn btn-primary">返回项目列表</button>
-            </div>
-
+            </div> -->
             <template v-else>
+            <!-- <template> -->
               <div v-for="message in projectMessages" :key="message.id" :class="['flex gap-2', message.role === 'user' ? 'flex-row-reverse' : '']">
                 <div :class="['w-5 h-5 rounded-lg flex items-center justify-center flex-shrink-0', getAvatarClass(message.role)]">
                   <component :is="getMessageIcon(message.role)" class="w-2.5 h-2.5" />
                 </div>
                 <div :class="['flex-1', message.role === 'user' ? 'max-w-xs' : 'max-w-full']">
                   <div :class="['rounded-lg p-2 border text-xs', getMessageClass(message.role)]">
-                    <p :class="['whitespace-pre-wrap leading-relaxed text-surface-700 text-xs', message.role === 'user' ? 'text-right' : 'text-left']" v-html="parseMarkdown(message.content || '')"></p>
+                    <p :class="['whitespace-pre-wrap leading-relaxed text-surface-700 text-xs', message.role === 'user' ? 'text-left' : 'text-left']" v-html="parseMarkdown(message.content || '')"></p>
                   </div>
                   <div :class="['flex items-center gap-1 mt-0.5 text-xs text-surface-400', message.role === 'user' ? 'justify-end' : '']">
                     <span>{{ formatTime(message.created_at) }}</span>
                     <button v-if="message.role !== 'user'" @click="copyMessage(message)" class="p-0.5 hover:text-surface-700 transition-colors">
-                      <Check v-if="copiedId === message.id" class="w-3 h-3 text-green-500" />
-                      <Copy v-else class="w-3 h-3" />
+                      <div class="flex items-center gap-1"><Check v-if="copiedId === message.id" class="w-3 h-3 text-green-500" />
+                        <Copy v-else class="w-3 h-3" />
+                      </div>
+                    </button>
+                    <button @click="deleteMessage(message)" class="p-0.5 hover:text-surface-700 transition-colors">
+                      <div class="flex items-center gap-1">
+                        <Trash2 class="w-3 h-3" />
+                      </div>
                     </button>
                   </div>
                 </div>
@@ -833,15 +1162,12 @@ let debugVisible = ref(false)
           </div>
         </div>
       </div>
+
+   
     </div>
 
   </div>
-  <el-dialog v-model="debugVisible" :close-on-click-modal="false" class="h-full overflow-auto border border-surface-200 rounded-lg p-4" style="margin-top:-1px" width="50%">
-    <ProjectContainerConfig 
-      :project="project"
-      :messages="projectMessages"
-    />
-  </el-dialog>
+
 </template>
 
 <style scoped>

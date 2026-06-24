@@ -6,7 +6,7 @@ const ADMIN_API_BASE = import.meta.env.VITE_API_ADMIN_URL ||
 
 const adminApi: AxiosInstance = axios.create({
   baseURL: ADMIN_API_BASE,
-  timeout: 30000,
+  timeout: 90000,
   headers: {
     'Content-Type': 'application/json',
   },

@@ -13,6 +13,7 @@ declare module 'vue' {
   export interface GlobalComponents {
     ConfirmDialog: typeof import('./src/components/ConfirmDialog.vue')['default']
     ElButton: typeof import('element-plus/es')['ElButton']
+    ElButtonGroup: typeof import('element-plus/es')['ElButtonGroup']
     ElDialog: typeof import('element-plus/es')['ElDialog']
     ElFormItem: typeof import('element-plus/es')['ElFormItem']
     ElTable: typeof import('element-plus/es')['ElTable']
@@ -22,5 +23,6 @@ declare module 'vue' {
     ElTree: typeof import('element-plus/es')['ElTree']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
+    TerminalComponent: typeof import('./src/components/TerminalComponent.vue')['default']
   }
 }

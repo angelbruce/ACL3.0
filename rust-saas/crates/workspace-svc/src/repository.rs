@@ -7,11 +7,11 @@ use shared::models::{
     Project, ProjectFile, ProjectMessage, ProjectSummary, ProjectWithNames,
     CreateProjectRequest, UpdateProjectRequest,
     CreateProjectFileRequest, UpdateProjectFileRequest, AddProjectMessageRequest,
-    CreateOrUpdateProjectSummaryRequest, ProjectContainerConfig
+    CreateOrUpdateProjectSummaryRequest, ProjectContainerConfig, AgentTool, Agent, AgentDetail, AgentSkill, MCPTool
 };
 use shared::schema::{kanban_boards, kanban_items, kanban_subscriptions, projects,
      project_files, project_messages, project_container_configs,
-     project_summaries, agents, llm_models
+     project_summaries, agents, llm_models, agent_tools, agent_skills
     };
 use std::env;
 use std::ops::Index;
@@ -33,7 +33,6 @@ impl WorkspaceRepository {
     pub async fn get_projects_by_user(&self, user_id: i64) -> ServiceResult<Vec<ProjectWithNames>> {
         let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
         
-        println!("1");
         let project_list: Vec<Project> = projects::table
             .filter(projects::user_id.eq(user_id))
             .order(projects::last_accessed_at.desc())
@@ -41,7 +40,6 @@ impl WorkspaceRepository {
         
         let mut result: Vec<ProjectWithNames> = Vec::new();
         
-        println!("2");
         for p in project_list {
             let model_name = if let Some(model_id) = p.model_id {
                 llm_models::table
@@ -53,7 +51,6 @@ impl WorkspaceRepository {
                 None
             };
             
-        println!("3");
             let agent_name = if let Some(agent_id) = p.agent_id {
                 agents::table
                     .filter(agents::id.eq(agent_id))
@@ -64,7 +61,6 @@ impl WorkspaceRepository {
                 None
             };
             
-        println!("4");
             result.push(ProjectWithNames {
                 id: p.id,
                 user_id: p.user_id,
@@ -392,23 +388,61 @@ impl WorkspaceRepository {
         Ok(config)
     }
 
+    pub async fn get_project_container_config_by_id(&self, config_id: i64) -> ServiceResult<Option<ProjectContainerConfig>> {
+        let mut conn: r2d2::PooledConnection<ConnectionManager<PgConnection>> = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        
+        let config = project_container_configs::table
+            .filter(project_container_configs::id.eq(config_id))
+            .first::<ProjectContainerConfig>(&mut conn)
+            .optional()?;
+        
+        Ok(config)
+    }
+
+     pub async fn get_project_container_config_by_container_name(&self, container_name: String) -> ServiceResult<Option<ProjectContainerConfig>> {
+        let mut conn: r2d2::PooledConnection<ConnectionManager<PgConnection>> = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        
+        let config = project_container_configs::table
+            .filter(project_container_configs::container_name.eq(container_name))
+            .first::<ProjectContainerConfig>(&mut conn)
+            .optional()?;
+        
+        Ok(config)
+    }
+
     pub async fn save_project_container_config(&self,
         creator_id: i64, 
         project_id: i64,
         datas: Vec<ProjectContainerConfig>) -> ServiceResult<Vec<ProjectContainerConfig>> {
-
-        let affected = self.delete_project_container_config_by_project_id(project_id).await;
-        match affected {
-            Ok(_) => {},
-            Err(e) =>{ }
-        };
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
 
         let now = Utc::now().naive_utc();
+        // diesel::delete(project_container_configs::table
+        //     .filter(project_container_configs::project_id.eq(project_id)))
+        //     .execute(&mut conn)?;
+
         let mut configs = Vec::new();
         for project_container_config in datas {
-            let config = self.insert_project_container_config(creator_id, project_id, project_container_config).await?;
-            configs.push(config.clone());        
-        };
+            let data = if project_container_config.id <= 0 {
+                self.get_project_container_config_by_container_name(project_container_config.container_name.clone()).await?
+            } else {
+                self.get_project_container_config_by_id(project_container_config.id).await?
+            };
+            match data {
+                Some(_) => {
+                    let config = self.update_project_container_config(project_container_config).await?;
+                    configs.push(config.clone());
+                    let data = config.clone();
+                    self.delete_project_container_config_by_name_and_id(data.container_name.clone(), project_id, data.id).await?;
+                }
+                _ => {
+                    let config = self.insert_project_container_config(creator_id, project_id, project_container_config).await?;
+                    configs.push(config.clone());
+                }
+            }
+            // let config = self.insert_project_container_config(creator_id, project_id, project_container_config).await?;
+            // configs.push(config.clone());
+        }
        
         Ok(configs)
     }
@@ -444,7 +478,52 @@ impl WorkspaceRepository {
         
         Ok(config)
     }
- 
+
+    pub async fn update_project_container_config(&self,
+        project_container_config: ProjectContainerConfig) -> ServiceResult<ProjectContainerConfig> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        let now = Utc::now().naive_utc();
+
+        let config = diesel::update(project_container_configs::table
+            .filter(project_container_configs::id.eq(project_container_config.id)))
+            .set((
+                project_container_configs::project_dir.eq(project_container_config.project_dir),
+                project_container_configs::published_ports.eq(project_container_config.published_ports),
+                project_container_configs::volumes.eq(project_container_config.volumes),
+                project_container_configs::environment.eq(project_container_config.environment),
+                project_container_configs::command.eq(project_container_config.command),
+                project_container_configs::working_dir.eq(project_container_config.working_dir),
+                project_container_configs::tags.eq(project_container_config.tags),
+                project_container_configs::container_name.eq(project_container_config.container_name),
+                project_container_configs::cpu_usage.eq(project_container_config.cpu_usage),
+                project_container_configs::memory_usage.eq(project_container_config.memory_usage),
+                project_container_configs::image_name.eq(project_container_config.image_name),
+                project_container_configs::updated_at.eq(now),
+            ))
+            .returning(ProjectContainerConfig::as_select())
+            .get_result(&mut conn)?;
+
+        Ok(config)
+    }
+
+
+    pub async fn delete_project_container_config_by_name_and_id(&self, container_name: String, project_id: i64, id: i64) -> ServiceResult<bool> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        
+        let result = diesel::delete(project_container_configs::table
+            .filter(project_container_configs::project_id.eq(project_id))
+            .filter(project_container_configs::container_name.eq(container_name))
+            .filter(project_container_configs::id.ne(id)))
+        .execute(&mut conn)?;
+        
+        if result == 0 {
+            println!("Delete project container config by name and id failed");
+            Ok(false)
+        } else {
+            Ok(true)
+        }
+    }
+
     pub async fn delete_project_container_config_by_project_id(&self, project_id: i64) -> ServiceResult<()> {
         let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
         
@@ -767,5 +846,167 @@ impl WorkspaceRepository {
             .get_result::<i64>(&mut conn)?;
         
         Ok(count)
+    }
+
+    pub async fn get_project_files_info(&self, project_id: i64) -> ServiceResult<Vec<crate::container::ProjectFileInfo>> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        
+        let files = project_files::table
+            .filter(project_files::project_id.eq(project_id))
+            .order(project_files::created_at.asc())
+            .load::<ProjectFile>(&mut conn)?;
+        
+        let file_infos: Vec<crate::container::ProjectFileInfo> = files
+            .into_iter()
+            .map(|f| crate::container::ProjectFileInfo {
+                id: f.id,
+                name: f.name,
+                directory: f.directory.unwrap_or_default(),
+                content: f.content,
+            })
+            .collect();
+        
+        Ok(file_infos)
+    }
+
+    pub async fn get_project_info_for_deployment(&self, project_id: i64) -> ServiceResult<Option<Project>> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        
+        let project = projects::table
+            .filter(projects::id.eq(project_id))
+            .first::<Project>(&mut conn)
+            .optional()?;
+        
+        Ok(project)
+    }
+
+    /// 获取模型信息
+    pub async fn get_model(&self, model_id: i64) -> ServiceResult<shared::models::LlmModel> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        
+        let model = llm_models::table
+            .filter(llm_models::id.eq(model_id))
+            .first::<shared::models::LlmModel>(&mut conn)
+            .map_err(|e| ServiceError::NotFound)?;
+        
+        Ok(model)
+    }
+
+    /// 获取项目的所有工具配置
+    /// 使用项目的 model_id 作为 agent_id 来查找工具
+    pub async fn get_project_tools(&self, project_id: i64) -> ServiceResult<Vec<AgentTool>> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        
+        // 从项目中获取 model_id 作为 agent_id
+        let project = projects::table
+            .filter(projects::id.eq(project_id))
+            .first::<Project>(&mut conn)
+            .optional()?;
+        
+        if let Some(p) = project {
+            if let Some(model_id) = p.model_id {
+                let tools = agent_tools::table
+                    .filter(agent_tools::agent_id.eq(model_id))
+                    .load::<AgentTool>(&mut conn)?;
+                return Ok(tools);
+            }
+        }
+        
+        // 如果没有找到，返回空数组
+        Ok(Vec::new())
+    }
+
+    pub async fn get_agent(&self, id: i64) -> ServiceResult<Agent> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        let agent = agents::table
+            .filter(agents::id.eq(id))
+            .first::<Agent>(&mut conn)?;
+        Ok(agent)
+    }
+
+    pub async fn get_agent_detail(&self, id: i64) -> ServiceResult<AgentDetail> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        
+        let agent = agents::table
+            .filter(agents::id.eq(id))
+            .first::<Agent>(&mut conn)?;
+
+        let tools = agent_tools::table
+            .filter(agent_tools::agent_id.eq(id))
+            .load::<AgentTool>(&mut conn)?;
+
+        let skills = agent_skills::table
+            .filter(agent_skills::agent_id.eq(id))
+            .load::<AgentSkill>(&mut conn)?;
+
+        Ok(AgentDetail {
+            id: agent.id,
+            name: agent.name,
+            defination: agent.defination,
+            tools,
+            skills,
+            content_stores: Vec::new(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        })
+    }
+
+    pub async fn get_agent_system_prompt(&self, id: i64) -> ServiceResult<Option<String>> {
+        let detail = self.get_agent_detail(id).await?;
+        
+        let mut parts: Vec<String> = Vec::new();
+        
+        if let Some(def) = detail.defination {
+            if !def.is_empty() {
+                parts.push(def);
+            }
+        }
+        
+        for skill in detail.skills {
+            parts.push(skill.skill_prompt);
+        }
+        
+        if parts.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(parts.join("\n\n")))
+        }
+    }
+
+    pub async fn get_agent_tools(&self, id: i64) -> ServiceResult<Vec<MCPTool>> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        
+        let tools = agent_tools::table
+            .filter(agent_tools::agent_id.eq(id))
+            .load::<AgentTool>(&mut conn)?;
+        
+        let mut mcp_tools = Vec::new();
+        for tool in tools {
+            let input_schema: serde_json::Value = serde_json::from_str(&tool.input_schema)
+                .unwrap_or(serde_json::json!({}));
+            
+            let mcp_tool = MCPTool {
+                name: tool.name,
+                description: tool.description,
+                input_schema,
+                output_schema: serde_json::json!({}),
+                server_id: None,
+            };
+            mcp_tools.push(mcp_tool);
+        }
+        
+        Ok(mcp_tools)
+    }
+
+    /// 删除项目消息
+    pub async fn delete_project_message(&self, project_id: i64, message_id: i64) -> ServiceResult<()> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        diesel::delete(
+            project_messages::table
+            .filter(project_messages::project_id.eq(project_id))
+            .filter(project_messages::id.eq(message_id))
+        )
+        .execute(&mut conn)?;
+        Ok(())
     }
 }

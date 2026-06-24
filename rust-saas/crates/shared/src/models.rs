@@ -661,8 +661,10 @@ pub struct ChatMessage {
 
 #[derive(Clone,Default,Debug, Serialize, Deserialize)]
 pub struct ToolCallInfo {
-    pub id:String,
+    pub id: Option<String>,
     pub index : Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "type")]
     pub tool_type:Option<String>,
     pub function:Option<ToolCallFunction>,
     pub arguments:Option<serde_json::Value>,
@@ -957,7 +959,8 @@ pub struct CreateLlmModelRequest {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct LlmTool {
-    pub tool_type: String,
+    #[serde(rename = "type")]
+    pub r#type: String,
     pub function: LlmToolFunction,
 }
 

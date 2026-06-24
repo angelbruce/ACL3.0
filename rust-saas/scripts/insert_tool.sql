@@ -1,0 +1,2 @@
+INSERT INTO agent_tools (agent_id, name, description, input_schema, output_schema, server_id, created_at, updated_at) 
+VALUES (15, 'execute_command', 'Execute a shell command in the debug container', '{"type":"object","properties":{"command":{"type":"string","description":"The command to execute"},"workDir":{"type":"string","description":"The working directory for the command"}},"required":["command"]}', '{"type":"object"}', 3, NOW(), NOW());

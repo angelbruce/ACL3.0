@@ -21,17 +21,12 @@ impl FlowStateMachine {
             return Err(ServiceError::Conflict("Flow is already running".to_string()));
         }
 
-        println!("21");
         let flow = self.repo.get_flow(flow_id).await?;
-        println!("22");
         let config: FlowConfigModel = parse_flow_config(&flow.config)?;
         
-        println!("23");
         let runtime = self.repo.create_flow_runtime(flow_id).await?;
-        println!("24");
         
         let head_nodes = extract_head_nodes(&config);
-        println!("25");
         //创建启动节点集合
         let node_creates = head_nodes.into_iter()
             .map(|v| FlowRuntimeNodeCreate {
@@ -43,10 +38,8 @@ impl FlowStateMachine {
                 next_choice: None,
             })
             .collect();
-        println!("26");
         
         self.repo.create_flow_runtime_nodes(runtime.id, flow_id, node_creates).await?;
-        println!("27");
         Ok(runtime)
     }
 
