@@ -5,7 +5,22 @@ import { ArrowLeft, Send, Loader2, Bot, User, Wrench, Copy, Check, ChevronDown, 
   Trash2,  Save,Play, FolderCheck, FileCode, 
   LucideFolderOutput,
   ComponentIcon,
-  CheckCircle2} from 'lucide-vue-next'
+  CheckCircle2,
+  Settings2Icon,
+  LucideSettings,
+  CastIcon,
+  CandyCane,
+  Eraser,
+  EraserIcon,
+  CornerLeftUpIcon,
+  CrossIcon,
+  Crosshair,
+  LucideCross,
+  CroissantIcon,
+  CableIcon,
+  LucideDelete,
+  LucideRemoveFormatting,
+  LucideArrowDownLeft} from 'lucide-vue-next'
 import { useWorkspaceStore, useLlmStore, useAuthStore, useAgentStore } from '@/stores'
 import { llmService, workspaceService, authService, type StreamResponse } from '@/api'
 import type { ProjectFile, LlmModel, Agent, ProjectChatMessage } from '@/types'
@@ -22,6 +37,7 @@ const messagesContainer = ref<HTMLElement | null>(null)
 const inputMessage = ref('请执行。')
 const sending = ref(false)
 const streamingContent = ref('')
+const streamingReasoningContent = ref('')
 const copiedId = ref<number | null>(null)
 const showModelDropdown = ref(false)
 const showAgentDropdown = ref(false)
@@ -37,6 +53,7 @@ const fileContent = ref('')
 const editingFile = ref(true)
 const autoSaveEnabled = ref(true)
 const showHistory = ref(false)
+const showReasoning = ref(false)
 
 const projectId = computed(() => Number(route.params.id))
 const project = computed(() => workspaceStore.currentProject)
@@ -279,8 +296,19 @@ const updateProjectSettings = async () => {
   }
 }
 
+const cancel  = ref(false);
+const cancelCall = async () => {
+  if (!sending.value) return
+  sending.value = false
+  streamingContent.value = ''
+}
+
 const sendMessage = async () => {
-  if (!selectedAgent.value) throw new Error('请先选择智能体')
+  cancel.value = false;
+  if (!selectedAgent.value) {
+    settings.value = true;
+    throw new Error('请先选择智能体')
+  }
   if (!inputMessage.value.trim() || sending.value) return
   if (!authStore.user) { router.push('/login'); return }
 
@@ -295,6 +323,7 @@ const sendMessage = async () => {
 
   try {
     if (!selectedModel.value) {
+      settings.value = true;
       throw new Error('请先选择模型') 
     }
 
@@ -325,6 +354,11 @@ const sendMessage = async () => {
 
     var cacheData = '';
     var refreshCount = 100;
+    var reasoningCache = '';
+    
+    if(cancel.value) {
+      return
+    }
     
     // 使用 workspace 专用的 chat/stream 接口
     await workspaceService.workspaceChatStream(
@@ -335,14 +369,23 @@ const sendMessage = async () => {
         config_id: configId,
         messages: chatMessages,
       },
-      (data: { content: string; tool_calls?: unknown; finish_reason?: string }) => { 
+      (data: { content: string; reasoning_content?: string; tool_calls?: unknown; finish_reason?: string }) => { 
+        if(cancel.value) {
+          throw new Error('operation cancel')
+        }
+        
         cacheData += data.content
+        if (data.reasoning_content) {
+          reasoningCache += data.reasoning_content
+        }
         refreshCount--
         if(refreshCount <= 0) {
           refreshCount = 100
           streamingContent.value += cacheData
+          streamingReasoningContent.value += reasoningCache
           console.log(cacheData)
           cacheData = '';
+          reasoningCache = '';
           nextTick(() => scrollToBottom())
         }
       },
@@ -350,9 +393,18 @@ const sendMessage = async () => {
     )
     if(refreshCount > 0) {
       streamingContent.value += cacheData
+      streamingReasoningContent.value += reasoningCache
     }
 
+    if(cancel.value) {
+      return;
+    }
     await workspaceStore.addProjectMessage(projectId.value, streamingContent.value, 'assistant')
+    
+    if (streamingReasoningContent.value.trim().length > 0) {
+      // reasoning_content 可以选择保存到消息中或仅在前端展示
+      // 这里暂时不保存到数据库，仅在前端展示
+    }
     
     if (autoSaveEnabled.value) {
       const files = extractNovelContent(streamingContent.value)
@@ -366,14 +418,23 @@ const sendMessage = async () => {
           const existingFile = workspaceStore.projectFiles.find(f => ((f.directory && f.directory.length >0) ? (f.directory + '/' + f.name)  : f.name) === filename)
           if (existingFile) {
             // 文件已存在，更新内容
+            if(cancel.value) {
+              return;
+            }
             await saveFileAndContent(existingFile.id, file.content)
           } else {
             // 文件不存在，创建新文件
+            if(cancel.value) {
+              return;
+            }
             const newFile = await workspaceStore.createProjectFile(projectId.value, filename)
             await saveFileAndContent(newFile.id, file.content)
           }
         }
-      
+
+        if(cancel.value) {
+          return;
+        }
         await planActions();
       }
     }
@@ -382,6 +443,7 @@ const sendMessage = async () => {
   } finally {
     sending.value = false
     streamingContent.value = ''
+    streamingReasoningContent.value = ''
     scrollToBottom()
   }
 
@@ -421,11 +483,10 @@ const planActions = async() => {
             processCommand(prompt)
           break;
         }
-        case "3": {
+        case "3": 
+        default: {
           break;
         }
-        case "3": return;
-        default: return;
       }
       
     })
@@ -663,6 +724,9 @@ const next_step = async (): Promise<string | null> => {
       })
     }
 
+  if(cancel.value) {
+    throw new Error('operation canceled');
+  }
    chatMessages.push({
         role: 'system',
         content: `[角色]：你是一个任务规划师，根据任务描述，规划出下一步。请根据规划结果，返回规划结果。规划结果必须以数字1、2、3开头。` 
@@ -682,7 +746,7 @@ const next_step = async (): Promise<string | null> => {
     }
 
     try {
-      const summaryPrompt = `必须从当前会话规划出下一步， 1 继续执行任务 2 在控制台执行指令<command> 3 退出任务 ，请根据当前会话内容，规划出下一步。`
+      const summaryPrompt = `必须从当前会话规划出下一步， 1 继续执行任务<任务描述> 2 在控制台执行指令<command> 3 退出任务 ，请根据当前会话内容，规划出下一步。`
       chatMessages.push({
           role: 'user',
           content: summaryPrompt
@@ -875,7 +939,17 @@ const handleCommandError = (error: string) => {
   })
 }
 
+const formatProjectDescription = (desc:string) => {
+  return desc == null ? "" :(desc.length > 100? desc.substring(0,100) + "...": desc)
+}
+
 let debugVisible = ref(false)
+
+let settings =  ref(false)
+
+const showSettings = () => {
+  settings.value = ! settings.value
+}
 </script>
 
 <template class="w-full h-full">
@@ -887,7 +961,18 @@ let debugVisible = ref(false)
           <span>返回项目列表</span>
         </button>
         <h2 class="font-semibold text-surface-800">{{ project?.name }}</h2>
-        <p class="text-sm text-surface-400 mt-1">{{ project?.description || '暂无描述' }}</p>
+        <p class="text-sm text-surface-400 mt-1">
+           <el-tooltip 
+              effect="dark"
+              placement="top"
+              class="w-1/2 h-1/2 mx-2 my-2 px-2 py-2"
+              >
+              <template #content>
+                {{project?.description}}
+              </template>
+            {{ formatProjectDescription(project?.description||"") || '暂无描述' }}
+           </el-tooltip>
+        </p>
       </div>
 
       <div class="flex-1 overflow-y-auto">
@@ -968,9 +1053,9 @@ let debugVisible = ref(false)
         </div> -->
         
         <div class="space-y-2">
-          <div class="relative">
+          <div class="relative" v-if="settings">
             <button @click="showModelDropdown = !showModelDropdown; showAgentDropdown = false" class="w-full flex items-center gap-2 px-3 py-2 bg-surface-50 border border-surface-200 rounded-lg hover:bg-surface-100 transition-colors text-sm text-surface-600">
-              <Settings class="w-4 h-4 text-surface-400" />
+              <CableIcon class="w-4 h-4 text-surface-400" />
               <span class="truncate">{{ selectedModel?.name || '选择模型' }}</span>
               <ChevronDown class="w-4 h-4 text-surface-400 ml-auto" />
             </button>
@@ -983,7 +1068,7 @@ let debugVisible = ref(false)
             </div>
           </div>
 
-          <div class="relative">
+          <div class="relative" v-if="settings">
             <button @click="showAgentDropdown = !showAgentDropdown; showModelDropdown = false" class="w-full flex items-center gap-2 px-3 py-2 bg-surface-50 border border-surface-200 rounded-lg hover:bg-surface-100 transition-colors text-sm text-surface-600">
               <Brain class="w-4 h-4 text-surface-400" />
               <span class="truncate">{{ selectedAgent?.name || '选择 Agent' }}</span>
@@ -996,22 +1081,45 @@ let debugVisible = ref(false)
             </div>
           </div>
 
-          <div class="p-2 bg-white border-t border-surface-200 flex-shrink-0">
+          <div class="p-2 bg-white border-surface-200 flex-shrink-0">
             <form @submit.prevent="sendMessage" class="flex flex-col gap-2">
-              <textarea
+             <div class="w-full">
+               <textarea
                 v-model="inputMessage" :readonly="sending"
-                class="w-full px-3 py-2 bg-surface-100 border border-surface-200 rounded-lg  text-sm text-surface-600"
+                class="w-full px-3 py-2 bg-surface-100 border border-surface-200 rounded-sm  text-sm text-surface-600"
+                style="font-size:12px;"
               />
-              
-              <button 
-                type="submit" 
-                :disabled="sending || !selectedModel"
-                class="w-full px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-sm"
-              >
-                <Loader2 v-if="sending" class="w-4 h-4 animate-spin" />
-                <Send v-else class="w-4 h-4" />
-                <span>{{ getBtnText }}</span>
-              </button>
+             </div>
+              <div class="w-full flex flex-row gap-1">
+                <div class="flex w-6" v-if="sending" @click="cancelCall">
+                  <button
+                    class="px-1 py-1 bg-surface-50 border border-surface-200 rounded-sm hover:bg-surface-100 transition-colors text-sm text-surface-600 flex items-center"
+                  >
+                      <LucideArrowDownLeft class="w-4 h-4" />
+                    
+                  </button>
+                </div>
+                <div class="flex flex-1">
+                  <button 
+                    type="submit" 
+                    :disabled="sending || !selectedModel"
+                    class="w-full px-4 py-2 bg-primary-500 text-white rounded-sm hover:bg-primary-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-sm"
+                  >
+                    <Loader2 v-if="sending" class="w-4 h-4 animate-spin" />
+                    <Send v-else class="w-4 h-4" />
+                    <span>{{ getBtnText }}</span>
+                  </button>
+                </div>
+                <div class="flex w-3">
+                  <button 
+                    class="px-1 py-1 bg-surface-50 border border-surface-200 rounded-sm hover:bg-surface-100 transition-colors text-sm text-surface-600 flex items-center"
+                  >
+                    <el-tooltip content="设置" placement="top">
+                      <CastIcon class="w-4 h-4" @click="showSettings()" />
+                    </el-tooltip>
+                  </button>
+                </div>
+              </div>
             </form>
           </div>
 
@@ -1052,7 +1160,6 @@ let debugVisible = ref(false)
             </button>
         
             <button class="bg-surface-50 border px-2 py-2 border-surface-200 rounded-lg hover:bg-surface-100 transition-colors text-sm text-surface-600 flex items-center gap-2"
-             v-if="project && project?.purpose === 'coding'" 
              @click="showHistory = !showHistory"
              >
              <CheckCircle2 class="w-4 h-4" /> <span>交互</span>
@@ -1148,6 +1255,24 @@ let debugVisible = ref(false)
                 </div>
               </div>
             </template>
+            <!-- 思考内容展示区域 -->
+            <div v-if="streamingReasoningContent" class="mb-2">
+              <button 
+                @click="showReasoning = !showReasoning"
+                class="flex items-center gap-1 text-xs text-surface-500 hover:text-surface-700 transition-colors mb-1"
+              >
+                <Brain class="w-3 h-3" />
+                <span>{{ showReasoning ? '隐藏' : '显示' }}思考过程</span>
+                <ChevronDown :class="['w-3 h-3 transition-transform', showReasoning ? 'rotate-180' : '']" />
+              </button>
+              <div 
+                v-if="showReasoning" 
+                class="p-2 bg-surface-50 rounded-lg border border-surface-200 text-xs text-surface-600 whitespace-pre-wrap overflow-auto max-h-60"
+              >
+                {{ streamingReasoningContent }}
+              </div>
+            </div>
+            <!-- 流式内容展示 -->
              <highlightjs 
               class="w-full h-30 resize-none border-none outline-none bg-transparent text-surface-700 leading-relaxed text-base
               word-break-break-word

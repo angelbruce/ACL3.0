@@ -12,6 +12,7 @@ members = [
     "crates/agent-svc",
     "crates/session-svc",
     "crates/workspace-svc",
+    "crates/vec-svc",
 ]
 
 
@@ -21,11 +22,12 @@ edition = "2021"
 
 [workspace.dependencies]
 axum = { version = "0.7", features = ["multipart"] }
+pq-sys = { version = "0.6", features = ["bundled"] }
 axum-extra = { version = "0.4", features = ["headers"] }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-diesel = { version = "2", features = ["postgres", "r2d2"] }
+diesel = { version = "2", features = ["postgres", "r2d2", "chrono", "serde_json"] }
 dotenv = "0.15"
 config = "0.13"
 jwt-simple = "0.12"
@@ -46,4 +48,7 @@ futures-util = { version = "0.3.0" }
 tokio-stream = { version="0.1.18",features=["full"] }
 rmcp = { version = "1.6.0" ,features=["server","schemars","macros","server-side-http","transport-streamable-http-server-session","transport-streamable-http-server","transport-async-rw","transport-worker"]}
 serde_yaml = "0.9"
+
+[patch.crates-io]
+shimmytok = { path = "patches/shimmytok-0.7.1" }
 

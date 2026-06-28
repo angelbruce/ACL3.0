@@ -8,6 +8,7 @@ export interface ChatResponse {
 
 export interface StreamResponse {
   content: string
+  reasoning_content?: string
   tool_calls?: { name: string; arguments: unknown }[]
   finish_reason?: string
 }

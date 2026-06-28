@@ -10,7 +10,7 @@ let URL_AUTH_API_BASE= `http://localhost:8080`;
   let URL_ADMIN_API_BASE= `http://localhost:8086`;
   let URL_WORKSPACE_API_BASE= `http://localhost:8087`;  
 
-if(host !== 'localhost:3000') {
+if(!host.startsWith('localhost:300')) {
    URL_AUTH_API_BASE= `http://${host}/foreign/auth`;
    URL_AGENT_API_BASE= `http://${host}/foreign/agents`;
    URL_FLOW_API_BASE= `http://${host}/foreign/flows`;

@@ -1,0 +1,38 @@
+FROM rust-base:latest as builder
+
+WORKDIR /app
+
+# 复制 Cargo 配置文件（包括 diesel 依赖）
+COPY Cargo.toml Cargo.toml
+COPY Cargo.lock Cargo.lock
+COPY crates/shared/Cargo.toml crates/shared/Cargo.toml
+COPY crates/extmacros/Cargo.toml crates/extmacros/Cargo.toml
+COPY crates/vec-svc/Cargo.toml crates/vec-svc/Cargo.toml
+
+# 复制源代码
+COPY crates/shared/src crates/shared/src
+COPY crates/extmacros/src crates/extmacros/src
+COPY crates/vec-svc/src crates/vec-svc/src
+
+# 构建
+RUN cargo build --release -p vec-svc
+
+# 运行时镜像
+FROM debian:bookworm-slim
+
+WORKDIR /app
+
+# 安装运行时依赖
+RUN apt-get update && apt-get install -y ca-certificates libssl-dev && rm -rf /var/lib/apt/lists/*
+
+# 复制二进制文件
+COPY --from=builder /app/target/release/vec-svc /app/vec-svc
+
+# 设置环境变量
+ENV RUST_LOG=info
+
+# 暴露端口
+EXPOSE 8080
+
+# 启动命令
+CMD ["./vec-svc"]

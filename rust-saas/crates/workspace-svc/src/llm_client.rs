@@ -9,8 +9,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Map;
 use std::collections::HashMap;
 use std::pin::Pin;
+use std::path::PathBuf;
+use tokio::process::Command;
 use shared::errors::{ServiceError, ServiceResult};
-use shared::models::{MCPTool, LlmTool, LlmToolFunction, ToolCallInfo, ToolCallFunction, ChatMessage};
+use shared::models::{MCPTool, LlmTool, LlmToolFunction, ToolCallInfo, ToolCallFunction, ChatMessage,
+    FileAssignmentInfo, ContainerConfigInfo, FileAssignmentResult};
 use crate::model::UserSession;
 
 /// 工具执行结果（与 llm-svc 保持一致）
@@ -25,14 +28,16 @@ pub struct ToolExecutor {
     servers: HashMap<i64, String>,
     default_server_url: String,
     client: Client,
+    debug_dir: Option<PathBuf>,
 }
 
 impl ToolExecutor {
-    pub fn new(servers: HashMap<i64, String>, default_server_url: &str) -> Self {
+    pub fn new(servers: HashMap<i64, String>, default_server_url: &str, debug_dir: Option<PathBuf>) -> Self {
         ToolExecutor {
             servers,
             default_server_url: default_server_url.to_string(),
             client: Client::new(),
+            debug_dir,
         }
     }
 
@@ -46,6 +51,29 @@ impl ToolExecutor {
     }
 
     pub async fn execute_tool(&self, name: &str, arguments: &serde_json::Value, server_id: Option<i64>) -> ServiceResult<String> {
+        if arguments.clone().to_string().contains("docker") {
+            if let Some(ref debug_dir) = self.debug_dir {
+                let result = Command::new(arguments.to_string())
+                    .current_dir(debug_dir)
+                    // .arg("up")
+                    // .arg("-d")
+                    // .arg("--build")
+                    // .arg("--remove-orphans")
+                    // .arg("--force-recreate")
+                    .spawn()
+                    .map_err(|e| ServiceError::McpError(e.to_string()))?
+                    .wait()
+                    .await
+                    .map_err(|e| ServiceError::McpError(e.to_string()))?;
+                
+                if result.success() {
+                    return Ok("Tool execution completed".to_string());
+                } else {
+                    return Err(ServiceError::McpError(format!("Command failed with exit code: {:?}", result.code())));
+                }
+            } 
+        }
+        
         let server_url = self.get_server_url(server_id);
         let url = format!("{}", server_url);
         let request = serde_json::json!({
@@ -198,9 +226,10 @@ impl ToolExecutor {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct StreamResponse {
     pub content: String,
+    pub reasoning_content: Option<String>,
     pub tool_calls: Option<Vec<ToolCallInfo>>,
     pub finish_reason: Option<String>,
 }
@@ -313,17 +342,19 @@ impl LlmClient {
                                 if json_str == "[DONE]" {
                                     responses.push(StreamResponse {
                                         content: "[DONE]".to_string(),
+                                        reasoning_content: None,
                                         tool_calls: None,
                                         finish_reason: Some("stop".to_string()),
                                     });
                                 } else if let Ok(chunk) = serde_json::from_str::<StreamChunk>(json_str) {
+                                    let reasoning_content = chunk.choices.first()
+                                        .and_then(|c| c.delta.reasoning_content.clone());
                                     let content = chunk.choices.first()
-                                        .and_then(|c| c.delta.reasoning_content.clone())
-                                        .or_else(|| chunk.choices.first()
-                                            .and_then(|c| c.delta.content.clone()))
+                                        .and_then(|c| c.delta.content.clone())
                                         .unwrap_or_default();
                                     responses.push(StreamResponse {
                                         content,
+                                        reasoning_content,
                                         tool_calls: chunk.choices.first()
                                             .and_then(|c| c.delta.tool_calls.clone()),
                                         finish_reason: chunk.choices.first()
@@ -353,6 +384,7 @@ impl LlmClient {
         user_id: i64,
         project_id: i64,
         config_id: Option<i64>,
+        debug_dir: Option<PathBuf>,
     ) -> ServiceResult<Pin<Box<dyn Stream<Item = StreamResponse> + Send>>> {
         let mut all_messages = messages;
         let mut tool_call_count = 0;
@@ -360,7 +392,7 @@ impl LlmClient {
         let api_key = self.api_key.clone();
         let model_name = self.model_name.clone();
 
-        let tool_executor = ToolExecutor::new(mcp_servers, mcp_default_url);
+        let tool_executor = ToolExecutor::new(mcp_servers, mcp_default_url, debug_dir);
 
         let tool_server_map: HashMap<String, Option<i64>> = tools
             .map(|ts| {
@@ -399,12 +431,18 @@ impl LlmClient {
         };
 
         let mut accumulated_content = String::new();
+        let mut accumulated_reasoning_content = String::new();
 
         loop {
             if tool_call_count >= max_tool_calls {
                 let stream = Box::pin(futures::stream::once(async move {
                     Ok::<_, ServiceError>(StreamResponse {
                         content: accumulated_content.clone(),
+                        reasoning_content: if accumulated_reasoning_content.is_empty() {
+                            None
+                        } else {
+                            Some(accumulated_reasoning_content.clone())
+                        },
                         tool_calls: None,
                         finish_reason: Some("tool_calls_limit".to_string()),
                     })
@@ -418,7 +456,7 @@ impl LlmClient {
 
             let mut stream = response.bytes_stream();
             let mut current_content = String::new();
-            let mut reasoning_content = String::new();
+            let mut current_reasoning_content = String::new();
             let mut accumulated_tool_calls: Vec<ToolCallInfo> = Vec::new();
             let mut finish_reason: Option<String> = None;
             let mut has_tool_call_chunk = false;
@@ -440,8 +478,7 @@ impl LlmClient {
                                     current_content.push_str(content);
                                 }
                                 if let Some(ref reasoning) = choice.delta.reasoning_content {
-                                    current_content.push_str(reasoning.as_str().clone());
-                                    reasoning_content.push_str(reasoning.as_str().clone());
+                                    current_reasoning_content.push_str(reasoning);
                                 }
 
                                 if let Some(ref tool_calls) = choice.delta.tool_calls {
@@ -529,9 +566,15 @@ impl LlmClient {
 
             if !has_tool_calls {
                 accumulated_content.push_str(&current_content);
+                accumulated_reasoning_content.push_str(&current_reasoning_content);
                 let stream = Box::pin(futures::stream::once(async move {
                     Ok::<_, ServiceError>(StreamResponse {
                         content: accumulated_content,
+                        reasoning_content: if accumulated_reasoning_content.is_empty() {
+                            None
+                        } else {
+                            Some(accumulated_reasoning_content)
+                        },
                         tool_calls: None,
                         finish_reason: Some("stop".to_string()),
                     })
@@ -540,6 +583,7 @@ impl LlmClient {
             }
 
             accumulated_content.push_str(&current_content);
+            accumulated_reasoning_content.push_str(&current_reasoning_content);
             tool_call_count += 1;
 
             for tc in &mut accumulated_tool_calls {
@@ -688,4 +732,207 @@ struct StreamDelta {
     pub content: Option<String>,
     pub tool_calls: Option<Vec<ToolCallInfo>>,
     pub reasoning_content: Option<String>,
+}
+
+// ============================================
+// 文件容器分配的LLM调用
+// ============================================
+
+impl LlmClient {
+    /// 调用LLM进行文件容器分配
+    /// 根据文件内容和容器配置，智能分析文件应该归属到哪些容器
+    /// container_config_id = 0 表示共有代码（所有容器都需要）
+    pub async fn assign_files_to_containers(
+        &self,
+        files: Vec<FileAssignmentInfo>,
+        container_configs: Vec<ContainerConfigInfo>,
+        project_id: i64,
+    ) -> ServiceResult<Vec<FileAssignmentResult>> {
+        let files_json = serde_json::to_string(&files)
+            .map_err(|e| ServiceError::LlmError(format!("Failed to serialize files: {}", e)))?;
+        
+        let configs_json = serde_json::to_string(&container_configs)
+            .map_err(|e| ServiceError::LlmError(format!("Failed to serialize configs: {}", e)))?;
+
+        let system_prompt = format!(
+            r#"你是一个专业的代码部署助手，负责分析项目文件并将其分配到正确的容器中。
+
+## 任务说明
+
+请分析以下项目文件，根据文件内容和用途，将每个文件分配到一个或多个容器中。
+
+## 容器配置
+
+容器配置信息（JSON格式）：
+{}
+
+## 文件列表
+
+项目文件列表（JSON格式）：
+{}
+
+## 分配规则
+
+1. **共有代码（container_config_id = 0）**：如果文件是所有容器都需要的通用代码，如工具函数、配置文件、共享数据模型等，请分配到 container_config_id = 0。
+
+2. **专属代码**：如果文件只属于特定容器，请分配到对应的容器配置ID。
+
+3. **多容器归属**：一个文件可以同时属于多个容器（包括共有代码），例如用户模型可能同时被API服务和Worker服务使用。
+
+4. **配置文件**：如 package.json, requirements.txt 等通常属于共有代码或所有需要它们的容器。
+
+5. **入口文件**：如 main.py, server.js 等通常属于特定容器的专属代码。
+
+6. **测试文件**：通常属于所有相关容器或共有代码。
+
+## 输出格式
+
+请严格按照以下JSON格式输出，不要包含其他内容：
+
+{{
+  "assignments": [
+    {{
+      "file_id": <文件ID>,
+      "file_path": "<文件完整路径>",
+      "container_config_ids": [<容器配置ID列表，0表示共有代码>],
+      "confidence_score": <0-100的置信度分数>,
+      "assignment_reason": "<分配原因说明>"
+    }}
+  ]
+}}
+
+## 示例
+
+{{
+  "assignments": [
+    {{
+      "file_id": 1,
+      "file_path": "src/common/utils.py",
+      "container_config_ids": [0],
+      "confidence_score": 95,
+      "assignment_reason": "通用工具函数，所有容器都需要"
+    }},
+    {{
+      "file_id": 2,
+      "file_path": "src/api/main.py",
+      "container_config_ids": [1],
+      "confidence_score": 90,
+      "assignment_reason": "API服务入口文件，专属api-server容器"
+    }},
+    {{
+      "file_id": 3,
+      "file_path": "src/models/user.py",
+      "container_config_ids": [0, 1, 2],
+      "confidence_score": 85,
+      "assignment_reason": "用户模型，api-server和worker容器都需要"
+    }}
+  ]
+}}
+"#,
+            configs_json, files_json
+        );
+
+        let messages = vec![
+            ChatMessage {
+                role: "system".to_string(),
+                content: Some(system_prompt),
+                ..Default::default()
+            },
+            ChatMessage {
+                role: "user".to_string(),
+                content: Some("请分析以上文件并进行容器分配。请严格按照指定的JSON格式输出结果，不要包含任何其他文字或解释。".to_string()),
+                ..Default::default()
+            },
+        ];
+
+        let body = ChatCompletionRequest {
+            model: self.model_name.clone(),
+            messages,
+            tools: None,
+            stream: Some(false),
+            max_tokens: Some(8192),
+            temperature: Some(0.3),
+        };
+
+        let response = self.build_request()
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| ServiceError::LlmError(e.to_string()))?;
+
+        let response_body = response.text()
+            .await
+            .map_err(|e| ServiceError::LlmError(e.to_string()))?;
+
+        println!("[FileAssignment] LLM response: {}", response_body);
+
+        let result: serde_json::Value = serde_json::from_str(&response_body)
+            .map_err(|e| ServiceError::LlmError(format!("Failed to parse LLM response: {}", e)))?;
+
+        let choices = result.get("choices")
+            .and_then(|c| c.as_array())
+            .ok_or_else(|| ServiceError::LlmError("Invalid LLM response format".to_string()))?;
+
+        if choices.is_empty() {
+            return Err(ServiceError::LlmError("LLM returned empty choices".to_string()));
+        }
+
+        let message = choices[0].get("message")
+            .ok_or_else(|| ServiceError::LlmError("Invalid LLM response format".to_string()))?;
+
+        let content = message.get("content")
+            .and_then(|c| c.as_str())
+            .ok_or_else(|| ServiceError::LlmError("LLM returned empty content".to_string()))?;
+
+        let content = content
+            .trim_start_matches("```json")
+            .trim_start_matches("```")
+            .trim_end_matches("```")
+            .trim();
+
+        let content_json: serde_json::Value = serde_json::from_str(content)
+            .map_err(|e| ServiceError::LlmError(format!("Failed to parse content as JSON: {}", e)))?;
+
+        let assignments_array = content_json.get("assignments")
+            .and_then(|a| a.as_array())
+            .ok_or_else(|| ServiceError::LlmError("Invalid assignments format".to_string()))?;
+
+        let mut assignments = Vec::new();
+        for item in assignments_array {
+            let file_id = item.get("file_id")
+                .and_then(|f| f.as_i64())
+                .ok_or_else(|| ServiceError::LlmError("Missing file_id in assignment".to_string()))?;
+
+            let file_path = item.get("file_path")
+                .and_then(|f| f.as_str())
+                .ok_or_else(|| ServiceError::LlmError("Missing file_path in assignment".to_string()))?
+                .to_string();
+
+            let container_config_ids: Vec<i64> = item.get("container_config_ids")
+                .and_then(|c| c.as_array())
+                .ok_or_else(|| ServiceError::LlmError("Missing container_config_ids in assignment".to_string()))?
+                .iter()
+                .filter_map(|id| id.as_i64())
+                .collect();
+
+            let confidence_score = item.get("confidence_score")
+                .and_then(|c| c.as_f64())
+                .unwrap_or(80.0);
+
+            let assignment_reason = item.get("assignment_reason")
+                .and_then(|r| r.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            assignments.push(FileAssignmentResult {
+                file_id,
+                file_path,
+                container_config_ids,
+                confidence_score,
+                assignment_reason,
+            });
+        }
+
+        Ok(assignments)
+    }
 }

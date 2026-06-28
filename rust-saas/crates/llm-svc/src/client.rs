@@ -553,7 +553,7 @@ impl LlmClient {
                 all_messages.push(shared::models::ChatMessage {
                     role: "tool".to_string(),
                     content: Some(tool_result),
-                    tool_call_id: Some(tool_call.id.clone()),
+                    tool_call_id: tool_call.id.clone(),
                     name: Some(tool_name),
                     tool_calls: None,
                 });

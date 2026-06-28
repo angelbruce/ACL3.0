@@ -335,6 +335,21 @@ table! {
     }
 }
 
+table! {
+    project_file_container_assignments (id) {
+        id -> Int8,
+        project_id -> Int8,
+        file_id -> Int8,
+        container_config_id -> Int8,
+        file_path -> Text,
+        assigned_by -> Text,
+        confidence_score -> Float8,
+        assignment_reason -> Nullable<Text>,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
 joinable!(agent_skills -> agents (agent_id));
 joinable!(agent_tools -> agents (agent_id));
 joinable!(content_store_configs -> agents (agent_id));
@@ -351,6 +366,8 @@ joinable!(permissions -> menus (menu_id));
 joinable!(project_files -> projects (project_id));
 joinable!(project_messages -> projects (project_id));
 joinable!(project_summaries -> projects (project_id));
+joinable!(project_file_container_assignments -> projects (project_id));
+joinable!(project_file_container_assignments -> project_files (file_id));
 
 allow_tables_to_appear_in_same_query!(
     agents,
@@ -381,4 +398,5 @@ allow_tables_to_appear_in_same_query!(
     project_files,
     project_messages,
     project_summaries,
+    project_file_container_assignments,
 );

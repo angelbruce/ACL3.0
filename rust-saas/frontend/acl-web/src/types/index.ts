@@ -307,6 +307,7 @@ export interface ProjectChatMessage {
   id: number
   project_id: number
   content: string
+  reasoning_content?: string
   role: 'user' | 'assistant' | 'system'
   created_at: string
 }

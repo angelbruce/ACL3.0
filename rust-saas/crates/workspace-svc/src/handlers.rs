@@ -11,7 +11,9 @@ use shared::models::{
     Project, ProjectFile, ProjectMessage, ProjectSummary, ProjectWithNames,
     CreateProjectRequest as SharedCreateProjectRequest, UpdateProjectRequest as SharedUpdateProjectRequest,
     CreateProjectFileRequest, UpdateProjectFileRequest, AddProjectMessageRequest,
-    CreateOrUpdateProjectSummaryRequest, ProjectContainerConfig, ChatMessage, MCPTool, LlmTool, LlmToolFunction
+    CreateOrUpdateProjectSummaryRequest, ProjectContainerConfig, ChatMessage, MCPTool, LlmTool, LlmToolFunction,
+    FileContainerAssignment, NewFileContainerAssignment, FileAssignmentRequest, FileAssignmentResult,
+    FileAssignmentInfo, ContainerConfigInfo
 };
 use shared::utils::Claims;
 use std::collections::HashMap;
@@ -33,6 +35,7 @@ use crate::container::{
     ContainerDeployer, ExecuteCommandResult, ContainerStatus,
     format_container_name, get_debug_directory
 };
+use crate::model::SaveProjectConfigPathRarams;
 
 fn get_workspace_root() -> PathBuf {
     PathBuf::from(env::var("WORKSPACE_ROOT").unwrap_or_else(|_| "./workspace_storage".to_string()))
@@ -539,8 +542,11 @@ pub async fn get_project_container_config(
 pub async fn save_project_container_config(
     Extension(claims): Extension<Claims>,
     Path(project_id): Path<i64>,
+    Query(params): Query<SaveProjectConfigPathRarams>,
     Json(req): Json<Vec<ProjectContainerConfig>>,    
 ) -> ServiceResult<Json<Vec<ProjectContainerConfig>>> {
+    let fetch = params.fetch;
+    println!("([save_project_container_config] fetch: {}", fetch); 
     let user_id = claims.user_id;
     let repo = WorkspaceRepository::new();
 
@@ -549,7 +555,8 @@ pub async fn save_project_container_config(
     let _ = ContainerDeployer::stop_containers(&debug_dir).await;
 
     println!("[save_project_container_config] Saving container configs for project_id: {}", project_id);
-    let config = repo.save_project_container_config(user_id, project_id, req).await?;
+    let config =    if !fetch {   repo.save_project_container_config(user_id, project_id, req).await? }
+                                                else { repo.replace_project_container_config(user_id, project_id, req).await? };    
 
     println!("[save_project_container_config] Starting containers for project_id: {}", project_id);
     let project = repo.get_project_info_for_deployment(project_id).await?
@@ -639,6 +646,52 @@ pub async fn start_container(
     let project_files = repo.get_project_files_info(project_id).await?;
     println!("[start_container] Project files count: {}", project_files.len());
 
+    let unassigned_files = repo.check_unassigned_files(project_id).await?;
+    let mut unassigned_file_id_map = HashMap::new();
+    for f in &unassigned_files {
+        unassigned_file_id_map.insert(f.id, f.id);
+    }
+    println!("[start_container] Unassigned files: {:?}", unassigned_files);
+    //代码按照项目进行分组
+    if !unassigned_files.is_empty() {
+        println!("[start_container] Found {} unassigned files, starting LLM file assignment...", unassigned_files.len());
+        
+        let file_infos = repo.get_file_assignment_info(project_id).await?;
+        let container_config_infos = repo.get_container_config_info(project_id).await?;
+
+        if !container_config_infos.is_empty() && !file_infos.is_empty() {
+            if let Some(model_id) = project.model_id {
+                let model = repo.get_model(model_id).await?;
+                let llm_client = LlmClient::new(&model.access_url, &model.api_key, &model.name);
+                
+                let assignments = llm_client.assign_files_to_containers(file_infos, container_config_infos, project_id).await?;
+                println!("code classifed by project over LLM completed!!!");
+                let new_assignments: Vec<NewFileContainerAssignment> = assignments
+                    .iter()
+                    .filter(|a| unassigned_file_id_map.contains_key(&a.file_id))
+                    .flat_map(|a| {
+                        a.container_config_ids.iter().map(move |config_id| {
+                            NewFileContainerAssignment {
+                                project_id,
+                                file_id: a.file_id,
+                                container_config_id: *config_id,
+                                file_path: a.file_path.clone(),
+                                assigned_by: "llm".to_string(),
+                                confidence_score: a.confidence_score,
+                                assignment_reason: Some(a.assignment_reason.clone()),
+                            }
+                        })
+                    })
+                    .collect();
+                
+                repo.save_file_assignments(project_id, new_assignments).await?;
+                println!("[start_container] LLM file assignment completed successfully");
+            } else {
+                println!("[start_container] No model configured, skipping file assignment");
+            }
+        }
+    }
+
     let deploy_result = ContainerDeployer::deploy_project(
         user_id,
         project_id,
@@ -662,6 +715,25 @@ pub async fn start_container(
     let container_name = format!("{}-{}-{}", user_id, project_id, first_container_id);
         
     let mcp_server_url = format!("http://{}:80", container_name);
+    // let mcp_sse_port = container_configs.iter()
+    //     .find(|c| c.id == first_container_id)
+    //     .map(|c| {
+    //         if !c.environment.is_empty() {
+    //             let envs: Vec<&str> = c.environment.split(',').collect();
+    //             for env in envs {
+    //                 let trimmed = env.trim();
+    //                 if trimmed.starts_with("MCP_SSE_PORT=") {
+    //                     return trimmed.split('=').nth(1).unwrap_or(crate::container::DEFAULT_MCP_SSE_PORT).to_string();
+    //                 }
+    //             }
+    //         }
+    //         crate::container::DEFAULT_MCP_SSE_PORT.to_string()
+    //     })
+    //     .unwrap_or(crate::container::DEFAULT_MCP_SSE_PORT.to_string());
+    
+    // let mcp_server_url = format!("http://{}:{}", container_name, mcp_sse_port);
+
+    let debug_dir = PathBuf::from(&deploy_result.debug_dir);
 
     let context = ProjectDeploymentContext {
         user_id,
@@ -673,9 +745,9 @@ pub async fn start_container(
         project_files: project_files.clone(),
         container_name: container_name.clone(),
         mcp_server_url,
+        debug_dir: debug_dir.clone(),
     };
 
-    let debug_dir = PathBuf::from(&deploy_result.debug_dir);
     let compose_config_content = std::fs::read_to_string(&deploy_result.docker_compose_path)
         .map_err(|_| ServiceError::InternalError)?;
 
@@ -928,9 +1000,28 @@ pub async fn workspace_chat_stream(
     // 2. 获取容器 MCP-SSE URL
     let container_name = format!("{}-{}-{}", user_id, req.project_id, req.config_id);
     let mcp_server_url = format!("http://{}:80", container_name);
+    // let mcp_sse_port = match repo.get_container_config(req.config_id).await {
+    //     Ok(config) => {
+    //         if !config.environment.is_empty() {
+    //             let envs: Vec<&str> = config.environment.split(',').collect();
+    //             for env in envs {
+    //                 let trimmed = env.trim();
+    //                 if trimmed.starts_with("MCP_SSE_PORT=") {
+    //                     trimmed.split('=').nth(1).unwrap_or(crate::container::DEFAULT_MCP_SSE_PORT).to_string()
+    //                 } else {
+    //                     continue
+    //                 }
+    //             }
+    //         }
+    //         crate::container::DEFAULT_MCP_SSE_PORT.to_string()
+    //     },
+    //     Err(_) => crate::container::DEFAULT_MCP_SSE_PORT.to_string(),
+    // };
+    
+    // let mcp_server_url = format!("http://{}:{}", container_name, mcp_sse_port);
     
     // 3. 从容器 MCP-SSE 服务动态获取工具列表
-    let tool_executor = ToolExecutor::new(HashMap::new(), &mcp_server_url);
+    let tool_executor = ToolExecutor::new(HashMap::new(), &mcp_server_url, None);
     let mut tools = match tool_executor.list_tools(None).await {
         Ok(t) => {
             println!("[DEBUG] Retrieved {} tools from container MCP-SSE", t.len());
@@ -1024,7 +1115,8 @@ pub async fn workspace_chat_stream(
             10,
             user_id,
             req.project_id,
-            Some(req.config_id)
+            Some(req.config_id),
+            None
         ).await {
             Ok(s) => Box::pin(s) as Pin<Box<dyn Stream<Item = StreamResponse> + Send>>,
             Err(e) => {
@@ -1067,4 +1159,215 @@ pub async fn delete_project_message(
         message_id,
         message: "Message deleted".to_string(),
     }))
+}
+
+// ============================================
+// 文件容器分配相关接口
+// ============================================
+
+#[derive(Debug, Deserialize)]
+pub struct AssignFilesRequest {
+    pub force: Option<bool>,
+}
+
+pub async fn assign_files_to_containers(
+    Extension(claims): Extension<Claims>,
+    Path(project_id): Path<i64>,
+    Query(params): Query<AssignFilesRequest>,
+) -> ServiceResult<Json<Vec<FileAssignmentResult>>> {
+    let user_id = claims.user_id;
+    let repo = WorkspaceRepository::new();
+
+    println!("[assign_files_to_containers] User: {}, Project: {}", user_id, project_id);
+
+    let project = repo.get_project_by_id(project_id).await?
+        .ok_or(ServiceError::NotFound)?;
+    
+    if project.user_id != user_id {
+        return Err(ServiceError::Unauthorized);
+    }
+
+    let unassigned_files = repo.check_unassigned_files(project_id).await?;
+    let force = params.force.unwrap_or(false);
+
+    if unassigned_files.is_empty() && !force {
+        println!("[assign_files_to_containers] No unassigned files found and force=false, returning existing assignments");
+        let assignments = repo.get_file_assignments(project_id).await?;
+        let results: Vec<FileAssignmentResult> = assignments
+            .into_iter()
+            .map(|a| FileAssignmentResult {
+                file_id: a.file_id,
+                file_path: a.file_path,
+                container_config_ids: vec![a.container_config_id],
+                confidence_score: a.confidence_score,
+                assignment_reason: a.assignment_reason.unwrap_or_default(),
+            })
+            .collect();
+        return Ok(Json(results));
+    }
+
+    let file_infos = repo.get_file_assignment_info(project_id).await?;
+    let container_configs = repo.get_container_config_info(project_id).await?;
+
+    if container_configs.is_empty() {
+        return Err(ServiceError::BadRequest("No container configs found for project".to_string()));
+    }
+
+    if file_infos.is_empty() {
+        return Err(ServiceError::BadRequest("No files found for project".to_string()));
+    }
+    println!("12");
+
+    let model_id = project.model_id
+        .ok_or(ServiceError::BadRequest("Project has no model configured".to_string()))?;
+
+    let model = repo.get_model(model_id).await?;
+
+    let llm_client = LlmClient::new(&model.access_url, &model.api_key, &model.name);
+
+    println!("[assign_files_to_containers] Calling LLM for file assignment...");
+    println!("[assign_files_to_containers] Files count: {}, Configs count: {}", file_infos.len(), container_configs.len());
+
+    let assignments = llm_client.assign_files_to_containers(file_infos, container_configs, project_id).await?;
+    println!("11");
+    println!("[assign_files_to_containers] LLM returned {} assignments", assignments.len());
+
+    let new_assignments: Vec<NewFileContainerAssignment> = assignments
+        .iter()
+        .flat_map(|a| {
+            a.container_config_ids.iter().map(move |config_id| {
+                NewFileContainerAssignment {
+                    project_id,
+                    file_id: a.file_id,
+                    container_config_id: *config_id,
+                    file_path: a.file_path.clone(),
+                    assigned_by: "llm".to_string(),
+                    confidence_score: a.confidence_score,
+                    assignment_reason: Some(a.assignment_reason.clone()),
+                }
+            })
+        })
+        .collect();
+
+    if force {
+        repo.delete_project_file_assignments(project_id).await?;
+    }
+
+    repo.save_file_assignments(project_id, new_assignments).await?;
+
+    Ok(Json(assignments))
+}
+
+pub async fn get_file_assignments(
+    Extension(claims): Extension<Claims>,
+    Path(project_id): Path<i64>,
+) -> ServiceResult<Json<Vec<FileContainerAssignment>>> {
+    let user_id = claims.user_id;
+    let repo = WorkspaceRepository::new();
+
+    let project = repo.get_project_by_id(project_id).await?
+        .ok_or(ServiceError::NotFound)?;
+    
+    if project.user_id != user_id {
+        return Err(ServiceError::Unauthorized);
+    }
+
+    let assignments = repo.get_file_assignments(project_id).await?;
+    Ok(Json(assignments))
+}
+
+pub async fn get_files_by_container(
+    Extension(claims): Extension<Claims>,
+    Path((project_id, container_config_id)): Path<(i64, i64)>,
+) -> ServiceResult<Json<Vec<FileContainerAssignment>>> {
+    let user_id = claims.user_id;
+    let repo = WorkspaceRepository::new();
+
+    let project = repo.get_project_by_id(project_id).await?
+        .ok_or(ServiceError::NotFound)?;
+    
+    if project.user_id != user_id {
+        return Err(ServiceError::Unauthorized);
+    }
+
+    let assignments = repo.get_files_by_container(project_id, container_config_id).await?;
+    Ok(Json(assignments))
+}
+
+pub async fn get_shared_files(
+    Extension(claims): Extension<Claims>,
+    Path(project_id): Path<i64>,
+) -> ServiceResult<Json<Vec<FileContainerAssignment>>> {
+    let user_id = claims.user_id;
+    let repo = WorkspaceRepository::new();
+
+    let project = repo.get_project_by_id(project_id).await?
+        .ok_or(ServiceError::NotFound)?;
+    
+    if project.user_id != user_id {
+        return Err(ServiceError::Unauthorized);
+    }
+
+    let assignments = repo.get_shared_files(project_id).await?;
+    Ok(Json(assignments))
+}
+
+pub async fn update_file_assignment(
+    Extension(claims): Extension<Claims>,
+    Path(project_id): Path<i64>,
+    Json(req): Json<FileAssignmentRequest>,
+) -> ServiceResult<Json<FileContainerAssignment>> {
+    let user_id = claims.user_id;
+    let repo = WorkspaceRepository::new();
+
+    let project = repo.get_project_by_id(project_id).await?
+        .ok_or(ServiceError::NotFound)?;
+    
+    if project.user_id != user_id {
+        return Err(ServiceError::Unauthorized);
+    }
+
+    let file = repo.get_project_file_by_id(req.file_id, user_id).await?;
+    if file.project_id != project_id {
+        return Err(ServiceError::BadRequest("File does not belong to project".to_string()));
+    }
+
+    let new_assignments: Vec<NewFileContainerAssignment> = req.container_config_ids
+        .iter()
+        .map(|config_id| {
+            NewFileContainerAssignment {
+                project_id,
+                file_id: req.file_id,
+                container_config_id: *config_id,
+                file_path: req.file_path.clone(),
+                assigned_by: "manual".to_string(),
+                confidence_score: 100.0,
+                assignment_reason: req.assignment_reason.clone(),
+            }
+        })
+        .collect();
+
+    let existing_assignments = repo.get_file_assignment_by_file(req.file_id).await?;
+    for existing in existing_assignments {
+        if !req.container_config_ids.contains(&existing.container_config_id) {
+            repo.delete_file_assignments(existing.file_id).await?;
+        }
+    }
+
+    let saved = repo.save_file_assignments(project_id, new_assignments).await?;
+    
+    Ok(Json(saved.into_iter().next().unwrap()))
+}
+
+pub async fn delete_file_assignment(
+    Extension(claims): Extension<Claims>,
+    Path(file_id): Path<i64>,
+) -> ServiceResult<Json<HashMap<String, String>>> {
+    let user_id = claims.user_id;
+    let repo = WorkspaceRepository::new();
+
+    let file = repo.get_project_file_by_id(file_id, user_id).await?;
+    repo.delete_file_assignments(file_id).await?;
+
+    Ok(Json(HashMap::from([("message".to_string(), "File assignments deleted successfully".to_string())])))
 }

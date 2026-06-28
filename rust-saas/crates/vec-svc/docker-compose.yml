@@ -1,0 +1,144 @@
+# vec-svc Docker Compose 示例
+# 用于本地开发和测试
+
+services:
+  vec-svc:
+    build:
+      context: ../../
+      dockerfile: crates/vec-svc/Dockerfile
+    container_name: acl-vec-svc
+    ports:
+      - "8088:8080"
+    volumes:
+      # 模型文件挂载（只读）
+      - ${MODEL_PATH:-./models}:/models:ro
+    environment:
+      - RUST_LOG=info
+      - DATABASE_URL=postgres://acl:acl123@postgres:5432/acl
+      - MILVUS_HOST=milvus
+      - MILVUS_PORT=19530
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+      - MINIO_BUCKET=documents
+      # Embedding 模型配置（启动时固定）
+      - EMBEDDING_MODEL_NAME=gemma-4-E4B-it
+      - EMBEDDING_MODEL_PATH=/models/gemma-4-E4B-it-Q4_0.gguf
+      - EMBEDDING_DIM=2560
+    depends_on:
+      postgres:
+        condition: service_healthy
+      milvus:
+        condition: service_started
+      minio:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - acl-network
+
+  postgres:
+    image: postgres:15
+    container_name: acl-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=acl
+      - POSTGRES_PASSWORD=acl123
+      - POSTGRES_DB=acl
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # 数据库初始化脚本
+      - ../migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U acl"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - acl-network
+
+  milvus:
+    image: milvusdb/milvus:v2.4.0
+    container_name: acl-milvus
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    environment:
+      - ETCD_ENDPOINTS=etcd:2379
+      - MINIO_ADDRESS=minio:9000
+    volumes:
+      - milvus_data:/var/lib/milvus
+    depends_on:
+      - etcd
+      - minio
+    restart: unless-stopped
+    networks:
+      - acl-network
+
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    container_name: acl-etcd
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    volumes:
+      - etcd_data:/etcd
+    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - acl-network
+
+  minio:
+    image: minio/minio:latest
+    container_name: acl-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - acl-network
+
+  # MinIO 初始化（创建 bucket）
+  minio-init:
+    image: minio/mc:latest
+    container_name: acl-minio-init
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set myminio http://minio:9000 minioadmin minioadmin;
+      mc mb myminio/documents;
+      mc policy set public myminio/documents;
+      exit 0;
+      "
+    networks:
+      - acl-network
+
+volumes:
+  postgres_data:
+  milvus_data:
+  etcd_data:
+  minio_data:
+
+networks:
+  acl-network:
+    driver: bridge

@@ -7,11 +7,13 @@ use shared::models::{
     Project, ProjectFile, ProjectMessage, ProjectSummary, ProjectWithNames,
     CreateProjectRequest, UpdateProjectRequest,
     CreateProjectFileRequest, UpdateProjectFileRequest, AddProjectMessageRequest,
-    CreateOrUpdateProjectSummaryRequest, ProjectContainerConfig, AgentTool, Agent, AgentDetail, AgentSkill, MCPTool
+    CreateOrUpdateProjectSummaryRequest, ProjectContainerConfig, AgentTool, Agent, AgentDetail, AgentSkill, MCPTool,
+    FileContainerAssignment, NewFileContainerAssignment, FileAssignmentInfo, ContainerConfigInfo
 };
 use shared::schema::{kanban_boards, kanban_items, kanban_subscriptions, projects,
      project_files, project_messages, project_container_configs,
-     project_summaries, agents, llm_models, agent_tools, agent_skills
+     project_summaries, agents, llm_models, agent_tools, agent_skills,
+     project_file_container_assignments
     };
 use std::env;
 use std::ops::Index;
@@ -410,6 +412,33 @@ impl WorkspaceRepository {
         Ok(config)
     }
 
+    pub async fn replace_project_container_config(&self,
+        creator_id: i64, 
+        project_id: i64,
+        datas: Vec<ProjectContainerConfig>) -> ServiceResult<Vec<ProjectContainerConfig>> {
+        let mut configs = vec![];
+        
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        // replace all config from new fetch project container config, first we need to remove all the project configs.
+        diesel::delete(project_container_configs::table
+            .filter(project_container_configs::project_id.eq(project_id)))
+            .filter(project_container_configs::creator_id.eq(creator_id))
+            .execute(&mut conn);
+
+        // the config mapping is invalied, so we need to delete the old mapping
+        diesel::delete(project_file_container_assignments::table
+            .filter(project_file_container_assignments::project_id.eq(project_id)))
+            .execute(&mut conn);
+
+        // insert new fetched configs
+        for project_container_config in datas {
+            let config = self.insert_project_container_config(creator_id, project_id, project_container_config).await?;
+            configs.push(config.clone());
+        }
+
+        Ok(configs) 
+    }
+
     pub async fn save_project_container_config(&self,
         creator_id: i64, 
         project_id: i64,
@@ -417,9 +446,6 @@ impl WorkspaceRepository {
         let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
 
         let now = Utc::now().naive_utc();
-        // diesel::delete(project_container_configs::table
-        //     .filter(project_container_configs::project_id.eq(project_id)))
-        //     .execute(&mut conn)?;
 
         let mut configs = Vec::new();
         for project_container_config in datas {
@@ -517,7 +543,7 @@ impl WorkspaceRepository {
         .execute(&mut conn)?;
         
         if result == 0 {
-            println!("Delete project container config by name and id failed");
+            // println!("Delete project container config by name and id failed");
             Ok(false)
         } else {
             Ok(true)
@@ -1008,5 +1034,270 @@ impl WorkspaceRepository {
         )
         .execute(&mut conn)?;
         Ok(())
+    }
+
+    // ============================================
+    // 文件容器分配相关方法
+    // ============================================
+
+    /// 检查项目是否有新文件需要分配
+    /// 返回未分配的文件列表
+    pub async fn check_unassigned_files(&self, project_id: i64) -> ServiceResult<Vec<ProjectFile>> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+
+        // 获取项目所有文件
+        let all_files = project_files::table
+            .filter(project_files::project_id.eq(project_id))
+            .load::<ProjectFile>(&mut conn)?;
+
+        // 获取已分配的文件ID
+        let assigned_file_ids: Vec<i64> = project_file_container_assignments::table
+            .filter(project_file_container_assignments::project_id.eq(project_id))
+            .select(project_file_container_assignments::file_id)
+            .distinct()
+            .load::<i64>(&mut conn)?;
+
+        // 过滤出未分配的文件
+        let unassigned_files: Vec<ProjectFile> = all_files
+            .into_iter()
+            .filter(|f| !assigned_file_ids.contains(&f.id))
+            .collect();
+
+        Ok(unassigned_files)
+    }
+
+    /// 获取项目的所有文件分配记录
+    pub async fn get_file_assignments(&self, project_id: i64) -> ServiceResult<Vec<FileContainerAssignment>> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+
+        let assignments = project_file_container_assignments::table
+            .filter(project_file_container_assignments::project_id.eq(project_id))
+            .order(project_file_container_assignments::file_path.asc())
+            .load::<FileContainerAssignment>(&mut conn)?;
+
+        Ok(assignments)
+    }
+
+    /// 获取指定文件的容器分配记录
+    pub async fn get_file_assignment_by_file(&self, file_id: i64) -> ServiceResult<Vec<FileContainerAssignment>> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+
+        let assignments = project_file_container_assignments::table
+            .filter(project_file_container_assignments::file_id.eq(file_id))
+            .load::<FileContainerAssignment>(&mut conn)?;
+
+        Ok(assignments)
+    }
+
+    /// 获取指定容器的文件列表
+    pub async fn get_files_by_container(&self, project_id: i64, container_config_id: i64) -> ServiceResult<Vec<FileContainerAssignment>> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+
+        let assignments = project_file_container_assignments::table
+            .filter(project_file_container_assignments::project_id.eq(project_id))
+            .filter(project_file_container_assignments::container_config_id.eq(container_config_id))
+            .load::<FileContainerAssignment>(&mut conn)?;
+
+        Ok(assignments)
+    }
+
+    /// 获取共有文件（container_config_id = 0）
+    pub async fn get_shared_files(&self, project_id: i64) -> ServiceResult<Vec<FileContainerAssignment>> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+
+        let assignments = project_file_container_assignments::table
+            .filter(project_file_container_assignments::project_id.eq(project_id))
+            .filter(project_file_container_assignments::container_config_id.eq(0))
+            .load::<FileContainerAssignment>(&mut conn)?;
+
+        Ok(assignments)
+    }
+
+    /// 保存文件分配结果
+    pub async fn save_file_assignments(&self, project_id: i64, assignments: Vec<NewFileContainerAssignment>) -> ServiceResult<Vec<FileContainerAssignment>> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+
+        let now = Utc::now().naive_utc();
+        let mut saved_assignments = Vec::new();
+
+        println!("13");
+        for assignment in assignments {
+        println!("14");
+            // 检查是否已存在相同的分配记录
+            let existing = project_file_container_assignments::table
+                .filter(project_file_container_assignments::file_id.eq(assignment.file_id))
+                .filter(project_file_container_assignments::container_config_id.eq(assignment.container_config_id))
+                .first::<FileContainerAssignment>(&mut conn)
+                .optional()?;
+
+        println!("15");
+            if let Some(existing_assignment) = existing {
+                // 更新现有记录
+        println!("16");
+                let updated = diesel::update(project_file_container_assignments::table
+                    .filter(project_file_container_assignments::id.eq(existing_assignment.id)))
+                    .set((
+                        project_file_container_assignments::confidence_score.eq(assignment.confidence_score),
+                        project_file_container_assignments::assignment_reason.eq(assignment.assignment_reason),
+                        project_file_container_assignments::assigned_by.eq(assignment.assigned_by),
+                        project_file_container_assignments::updated_at.eq(now),
+                    ))
+                    .returning(FileContainerAssignment::as_select())
+                    .get_result(&mut conn)?;
+                saved_assignments.push(updated);
+        println!("18");
+            } else {
+        println!("17");
+                // 插入新记录
+                let data = 
+                 diesel::insert_into(project_file_container_assignments::table)
+                    .values((
+                        project_file_container_assignments::project_id.eq(assignment.project_id),
+                        project_file_container_assignments::file_id.eq(assignment.file_id),
+                        project_file_container_assignments::container_config_id.eq(assignment.container_config_id),
+                        project_file_container_assignments::file_path.eq(assignment.file_path),
+                        project_file_container_assignments::assigned_by.eq(assignment.assigned_by),
+                        project_file_container_assignments::confidence_score.eq(assignment.confidence_score),
+                        project_file_container_assignments::assignment_reason.eq(assignment.assignment_reason),
+                        project_file_container_assignments::created_at.eq(now),
+                        project_file_container_assignments::updated_at.eq(now),
+                    ))
+                    .returning(FileContainerAssignment::as_select())
+                    .get_result(&mut conn);
+                match data {
+                    Ok(saved) => {
+                        saved_assignments.push(saved);
+                    }
+                    Err(e) => {
+                        println!("Error inserting file assignment: {:?}", e);
+                    }
+                }
+        println!("19");
+            }
+        }
+
+        println!("20");
+        Ok(saved_assignments)
+    }
+
+    /// 删除文件的所有分配记录
+    pub async fn delete_file_assignments(&self, file_id: i64) -> ServiceResult<()> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+
+        diesel::delete(
+            project_file_container_assignments::table
+                .filter(project_file_container_assignments::file_id.eq(file_id))
+        )
+        .execute(&mut conn)?;
+
+        Ok(())
+    }
+
+    /// 删除项目的所有文件分配记录
+    pub async fn delete_project_file_assignments(&self, project_id: i64) -> ServiceResult<()> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+
+        diesel::delete(
+            project_file_container_assignments::table
+                .filter(project_file_container_assignments::project_id.eq(project_id))
+        )
+        .execute(&mut conn)?;
+
+        Ok(())
+    }
+
+    /// 获取文件分配信息（用于LLM调用）
+    pub async fn get_file_assignment_info(&self, project_id: i64) -> ServiceResult<Vec<FileAssignmentInfo>> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+
+        let files = project_files::table
+            .filter(project_files::project_id.eq(project_id))
+            .load::<ProjectFile>(&mut conn)?;
+
+        let file_infos: Vec<FileAssignmentInfo> = files
+            .into_iter()
+            .map(|f| {
+                let file_path = if let Some(dir) = f.directory {
+                    if dir.is_empty() {
+                        f.name.clone()
+                    } else {
+                        format!("{}/{}", dir, f.name)
+                    }
+                } else {
+                    f.name.clone()
+                };
+
+                FileAssignmentInfo {
+                    file_id: f.id,
+                    file_path,
+                    file_content: f.content,
+                }
+            })
+            .collect();
+
+        Ok(file_infos)
+    }
+
+    /// 获取容器配置信息（用于LLM调用）
+    pub async fn get_container_config_info(&self, project_id: i64) -> ServiceResult<Vec<ContainerConfigInfo>> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+
+        let configs = project_container_configs::table
+            .filter(project_container_configs::project_id.eq(project_id))
+            .filter(project_container_configs::container_name.ne("docker-compose.yml"))
+            .load::<ProjectContainerConfig>(&mut conn)?;
+
+        let config_infos: Vec<ContainerConfigInfo> = configs
+            .into_iter()
+            .map(|c| ContainerConfigInfo {
+                config_id: c.id,
+                container_name: c.container_name,
+                working_dir: c.working_dir,
+                tags: c.tags,
+            })
+            .collect();
+
+        Ok(config_infos)
+    }
+
+    /// 获取容器需要部署的文件列表（包括共有文件）
+    pub async fn get_container_files_for_deployment(&self, project_id: i64, container_config_id: i64) -> ServiceResult<Vec<crate::container::ProjectFileInfo>> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+
+        // 获取专属文件
+        let exclusive_assignments = project_file_container_assignments::table
+            .filter(project_file_container_assignments::project_id.eq(project_id))
+            .filter(project_file_container_assignments::container_config_id.eq(container_config_id))
+            .load::<FileContainerAssignment>(&mut conn)?;
+
+        // 获取共有文件
+        let shared_assignments = project_file_container_assignments::table
+            .filter(project_file_container_assignments::project_id.eq(project_id))
+            .filter(project_file_container_assignments::container_config_id.eq(0))
+            .load::<FileContainerAssignment>(&mut conn)?;
+
+        // 合并文件ID列表
+        let all_file_ids: Vec<i64> = exclusive_assignments
+            .iter()
+            .chain(shared_assignments.iter())
+            .map(|a| a.file_id)
+            .collect();
+
+        // 获取文件详情
+        let files = project_files::table
+            .filter(project_files::id.eq_any(&all_file_ids))
+            .load::<ProjectFile>(&mut conn)?;
+
+        let file_infos: Vec<crate::container::ProjectFileInfo> = files
+            .into_iter()
+            .map(|f| crate::container::ProjectFileInfo {
+                id: f.id,
+                name: f.name,
+                directory: f.directory.unwrap_or_default(),
+                content: f.content,
+            })
+            .collect();
+
+        Ok(file_infos)
     }
 }

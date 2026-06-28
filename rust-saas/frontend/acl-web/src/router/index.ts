@@ -149,6 +149,66 @@ const routes: RouteRecordRaw[] = [
         name: 'Subscriptions',
         component: () => import('@/views/workspace/SubscribedBoards.vue'),
       },
+      {
+        path: 'vec',
+        name: 'VecDashboard',
+        component: () => import('@/views/vec/Dashboard.vue'),
+      },
+      {
+        path: 'vec/search',
+        name: 'VecSearch',
+        component: () => import('@/views/vec/Search.vue'),
+      },
+      {
+        path: 'vec/documents',
+        name: 'VecDocuments',
+        component: () => import('@/views/vec/Documents/List.vue'),
+      },
+      {
+        path: 'vec/documents/:id',
+        name: 'VecDocumentDetail',
+        component: () => import('@/views/vec/Documents/Detail.vue'),
+      },
+      {
+        path: 'vec/graph',
+        name: 'VecKnowledgeGraph',
+        component: () => import('@/views/vec/KnowledgeGraph.vue'),
+      },
+      {
+        path: 'vec/distillation',
+        name: 'VecDistillation',
+        component: () => import('@/views/vec/Distillation.vue'),
+      },
+      {
+        path: 'vec/taxonomy',
+        name: 'VecTaxonomy',
+        component: () => import('@/views/vec/Taxonomy.vue'),
+      },
+      {
+        path: 'vec/boundary',
+        name: 'VecBoundary',
+        component: () => import('@/views/vec/Boundary.vue'),
+      },
+      {
+        path: 'vec/analytics',
+        name: 'VecAnalytics',
+        component: () => import('@/views/vec/Analytics.vue'),
+      },
+      {
+        path: 'vec/version',
+        name: 'VecVersion',
+        component: () => import('@/views/vec/Version.vue'),
+      },
+      {
+        path: 'vec/tasks',
+        name: 'VecTasks',
+        component: () => import('@/views/vec/Task.vue'),
+      },
+      {
+        path: 'vec/import-export',
+        name: 'VecImportExport',
+        component: () => import('@/views/vec/ImportExport.vue'),
+      },
     ],
   },
 ]
@@ -159,6 +219,12 @@ const router = createRouter({
 })
 
 router.beforeEach(async (to, _from, next) => {
+  // Temporarily bypass auth for VEC pages preview
+  if (to.path.startsWith('/vec')) {
+    next()
+    return
+  }
+
   const authStore = useAuthStore()
 
   if (to.meta.requiresAuth === false) {

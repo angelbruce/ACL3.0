@@ -164,8 +164,12 @@ const exposedInfo = computed(() =>{
     return {name:'', ports: '', state:'', command:'',urls:[]};
 })
 
+
+const fetch = ref(false)
+
 const fetchBasicInfo = () => {
     try {
+        fetch.value = true;
         isLlmRunning.value = true;
         let model_id = props.project.model_id;
         let agent_id = props.project.agent_id;
@@ -324,7 +328,7 @@ const saveContainerConfig = () => {
         })
     }
 
-    workspaceStore.saveProjectContainerConfigs(props.project.id, savedConfigs).then(() => {
+    workspaceStore.saveProjectContainerConfigs(props.project.id, savedConfigs, fetch.value).then(() => {
         let data = workspaceStore.projectContainerConfigs ||[]
         let compose = data.filter(x=>x.container_name==='docker-compose.yml') || []
         let configs = data.filter(x=>x.container_name!=='docker-compose.yml') || []

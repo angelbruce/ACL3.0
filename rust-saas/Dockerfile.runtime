@@ -1,5 +1,5 @@
-# Rust 基础运行时镜像
-FROM debian:bookworm-slim
+# Rust 基础运行时镜像 - 包含 CUDA 运行时
+FROM ubuntu:24.04 
 
 WORKDIR /app
 

@@ -9,8 +9,8 @@ serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 thiserror = "1"
-diesel = { version = "2", features = ["postgres", "r2d2", "chrono", "serde_json"] }
-pq-sys = { version = "0.6", features = ["bundled"] }
+diesel.workspace = true
+pq-sys.workspace = true
 openssl-sys = { version = "0.9.116", features = ["vendored"] }
 jsonwebtoken = "9"
 axum = "0.7"

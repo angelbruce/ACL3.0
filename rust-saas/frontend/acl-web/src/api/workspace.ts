@@ -238,8 +238,8 @@ export const workspaceService = {
     })
   },
 
-  getProjectContainerConfigs: (projectId: number) => api.get<ProjectContainerConfig[]>(workspaceApi, `/api/project-container-configs/${projectId}`),
-  saveProjectContainerConfigs: (projectId:number, data: ProjectContainerConfig[]) => api.post<ProjectContainerConfig[]>(workspaceApi, `/api/project-container-configs/${projectId}`, data),
+  getProjectContainerConfigs: (projectId: number, fetch: boolean) => api.get<ProjectContainerConfig[]>(workspaceApi, `/api/project-container-configs/${projectId}?fetch=${fetch}`),
+  saveProjectContainerConfigs: (projectId:number, data: ProjectContainerConfig[], fetch: boolean) => api.post<ProjectContainerConfig[]>(workspaceApi, `/api/project-container-configs/${projectId}?fetch=${fetch}`, data),
   startContainer: (projectId: number) => api.post<{ message: string }>(workspaceApi, `/api/project-container-configs/${projectId}/start`),
   executeCommand: (projectId: number, configId: number, command: string) => api.post<{ success: boolean, output: string, error?: string }>(workspaceApi, '/api/projects/execute-command', {
     project_id: projectId,
@@ -320,7 +320,7 @@ export const workspaceService = {
       agent_id?: number
       messages: { role: string; content?: string; tool_call_id?: string; name?: string; tool_calls?: unknown }[]
     },
-    onMessage: (data: { content: string; tool_calls?: unknown; finish_reason?: string }) => void,
+    onMessage: (data: { content: string; reasoning_content?: string; tool_calls?: unknown; finish_reason?: string }) => void,
     onError?: (error: Error) => void
   ): Promise<void> => {
     const token = localStorage.getItem('access_token')
@@ -361,7 +361,12 @@ export const workspaceService = {
               try {
                 const data = JSON.parse(dataStr)
                 onMessage(data)
-              } catch {
+              } catch (e: any) {
+                  if (e.message.includes("operation cancel")) { 
+                    //terminate the stream
+                    throw e;
+                   }
+                  
                 // Ignore parse errors
               }
             }

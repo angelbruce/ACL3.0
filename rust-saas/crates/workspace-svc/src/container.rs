@@ -16,6 +16,21 @@ use crate::llm_client::ToolExecutor;
 use crate::repository::WorkspaceRepository;
 use shared::models::{ChatMessage, MCPTool};
 
+// pub const DEFAULT_MCP_SSE_PORT: &str = "80";
+
+// fn get_mcp_sse_port(config: &ProjectContainerConfig) -> String {
+//     if !config.environment.is_empty() {
+//         let envs: Vec<&str> = config.environment.split(',').collect();
+//         for env in envs {
+//             let trimmed = env.trim();
+//             if trimmed.starts_with("MCP_SSE_PORT=") {
+//                 return trimmed.split('=').nth(1).unwrap_or(DEFAULT_MCP_SSE_PORT).to_string();
+//             }
+//         }
+//     }
+//     DEFAULT_MCP_SSE_PORT.to_string()
+// }
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DockerComposeService {
     pub image: String,
@@ -89,6 +104,7 @@ pub struct ProjectDeploymentContext {
     pub project_files: Vec<ProjectFileInfo>,
     pub container_name: String,
     pub mcp_server_url: String,
+    pub debug_dir: PathBuf,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -398,7 +414,6 @@ pub fn generate_docker_compose_config(
             for port in port_list {
                 let trimmed = port.trim();
                 if !trimmed.is_empty() {
-                    // 只使用内部端口（冒号后面的部分），让 Docker 自动分配外部随机端口
                     if trimmed.contains(':') {
                         let internal = trimmed.split(':').last().unwrap_or(trimmed);
                         ports.push(internal.to_string());
@@ -409,8 +424,11 @@ pub fn generate_docker_compose_config(
             }
         }
 
-        // MCP-SSE 端口 80 固定添加，让 Docker 自动分配外部端口
-        ports.push("80".to_string());
+        // let mcp_sse_port = get_mcp_sse_port(config);
+        
+        // if !ports.contains(&mcp_sse_port) {
+        //     ports.push(mcp_sse_port.clone());
+        // }
 
         // volumes - 使用 bind mount（宿主机路径:容器路径）
         use std::collections::HashMap;
@@ -547,7 +565,8 @@ pub fn write_docker_compose(
 pub fn generate_llm_deployment_prompt(context: &ProjectDeploymentContext) -> String {
     let mut prompt = String::new();
 
-    prompt.push_str("你是一个专业的项目部署助手。请按照以下步骤完成工作区项目的 Docker 容器部署：\n\n");
+    prompt.push_str("作为一个专业的项目部署助手，你会锲而不舍的解决项目部署过程中遇到的问题。请按照以下步骤完成工作区项目的 Docker 容器部署：\n\n");
+    prompt.push_str("【工作区项目的 Docker 容器部署：\n\n");
     prompt.push_str("【项目信息】\n");
     prompt.push_str(&format!("用户ID: {}\n", context.user_id));
     prompt.push_str(&format!("项目ID: {}\n", context.project_id));
@@ -555,6 +574,35 @@ pub fn generate_llm_deployment_prompt(context: &ProjectDeploymentContext) -> Str
     prompt.push_str(&format!("Agent ID: {:?}\n", context.agent_id));
     prompt.push_str(&format!("Model ID: {:?}\n", context.model_id));
     prompt.push_str("\n");
+    prompt.push_str("【工作区项目的 Docker 容器名称规则】\n");
+    prompt.push_str("容器名称格式: 用户ID_项目ID_容器名称\n");
+    prompt.push_str("容器名称示例: 1234567890_1234567890_app-debug-base\n");
+
+    prompt.push_str("【工作区项目的 Docker 容器完整启动方法】\n");
+    prompt.push_str("**容器启动后就会常驻，不需要单独设定常驻命令，但是项目需要执行其他命令才能运行起来，容器启动不代表项目启动**。\n");
+    prompt.push_str("容器启动前，需要你检测容器启动必须具备哪些生产环境，启动后，直接执行生产环境安装的命令，这个需要你通过MCP工具execute_command来完成。\n");
+    prompt.push_str("容器启动后，需要**进入到容器中编译项目、打包项目、执行项目，这个需要你通过MCP工具execute_command来完成**。\n");
+    prompt.push_str("项目容器启动例子(Vue-cli):\n");
+    prompt.push_str("1. 进入到容器中，检测到vue项目，执行npm install\n");
+    prompt.push_str("2. 编译项目\n，执行npm run build\n");
+    prompt.push_str("3. 打包项目\n，执行npm run build\n，执行npm run build:prod\n");
+    prompt.push_str("4. 执行项目\n，执行npm run dev或者执行npm run serve\n");
+    prompt.push_str("项目容器启动例子(java-maven):\n");
+    prompt.push_str("1. 进入到容器中，检测到java-maven项目，执行mvn install\n");
+    prompt.push_str("2. 编译项目\n，执行mvn compile\n");
+    prompt.push_str("3. 打包项目\n，执行mvn package\n");
+    prompt.push_str("4. 执行项目\n，执行mvn run或者执行java -jar target/your-project-name.jar\n");
+    prompt.push_str("项目容器启动例子(java-spring-boot):\n");
+    prompt.push_str("1. 进入到容器中，检测到java-maven项目，执行mvn install\n");
+    prompt.push_str("2. 编译项目\n，执行mvn compile\n");
+    prompt.push_str("3. 打包项目\n，执行mvn package\n");
+    prompt.push_str("4. 执行项目\n，执行mvn run或者执行java -jar target/your-project-name.jar\n");
+    prompt.push_str("项目容器启动例子(go-lang):\n");
+    prompt.push_str("1. 进入到容器中，检测到go-lang项目，执行go install\n");
+    prompt.push_str("2. 编译项目\n，执行go build\n");
+    prompt.push_str("3. 打包项目\n，执行go package\n");
+    prompt.push_str("4. 执行项目\n，执行go run\n");
+
 
     prompt.push_str("【项目文件列表】（包含文件内容）\n");
     for file in &context.project_files {
@@ -593,15 +641,16 @@ pub fn generate_llm_deployment_prompt(context: &ProjectDeploymentContext) -> Str
     }
     prompt.push_str("\n");
 
-    prompt.push_str("【MCP 服务说明】\n");
-    prompt.push_str("每个容器启动后，内部端口 80 会映射到宿主机的随机端口（docker-compose 自动分配）。\n");
-    prompt.push_str("容器内置了 MCP-SSE 服务，可以通过以下方式注册和使用工具：\n\n");
+    // prompt.push_str("【MCP 服务说明】\n");
+    // let mcp_sse_port = get_mcp_sse_port(config);
+    // prompt.push_str(&format!("每个容器启动后，内部端口 {} 会映射到宿主机的随机端口（docker-compose 自动分配）。\n", mcp_sse_port));
+    // prompt.push_str("容器内置了 MCP-SSE 服务，可以通过以下方式注册和使用工具：\n\n");
     // prompt.push_str("1. **注册 MCP 工具**：\n");
     // prompt.push_str("   - 容器启动后，MCP-SSE 服务会在端口 80 上监听\n");
     // prompt.push_str("   - 使用 execute_command 工具执行：curl -X POST http://localhost:80/mcp/register -d '{\"name\": \"tool_name\", \"description\": \"tool_description\"}'\n");
     // prompt.push_str("   - 或使用容器内的 mcp-cli 命令行工具进行注册\n");
     // prompt.push_str("\n");
-    prompt.push_str("2. **可用的 MCP 工具**：\n");
+    prompt.push_str("1. **可用的 MCP 工具**：\n");
     prompt.push_str("   - execute_command: 在容器内执行命令\n");
     // prompt.push_str("   - file_reader: 读取文件内容\n");
     // prompt.push_str("   - file_writer: 写入文件内容\n");
@@ -610,7 +659,7 @@ pub fn generate_llm_deployment_prompt(context: &ProjectDeploymentContext) -> Str
     // prompt.push_str("   - process_monitor: 监控进程状态\n");
     // prompt.push_str("   - port_check: 检查端口监听状态\n");
     prompt.push_str("\n");
-    prompt.push_str("3. **使用 MCP 工具**：\n");
+    prompt.push_str("2. **使用 MCP 工具**：\n");
     prompt.push_str("   - 通过 LLM 调用时，工具名称为 execute_command\n");
     prompt.push_str("   - 在容器内可以通过 HTTP 请求调用 MCP 服务\n");
     prompt.push_str("   - 示例：curl -X POST http://localhost:80/mcp/call -d '{\"tool\": \"execute_command\", \"args\": {\"command\": \"ls -la\"}}'\n");
@@ -638,9 +687,9 @@ pub fn generate_llm_deployment_prompt(context: &ProjectDeploymentContext) -> Str
     // prompt.push_str("\n");
     prompt.push_str("1. **启动容器**：你在使用的时候，应该是已经启动了， 如果没有启动，请使用 docker-compose up -d 启动所有容器\n");
     prompt.push_str("\n");
-    prompt.push_str("2. **获取映射端口**：使用 docker-compose ps 或 docker port 命令获取容器端口映射信息\n");
-    prompt.push_str("   - 示例：docker-compose ps --format json | jq '.[] | {name, ports}'\n");
-    prompt.push_str("   - 或：docker port {container_name} 80\n");
+    // prompt.push_str("2. **获取映射端口**：使用 docker-compose ps 或 docker port 命令获取容器端口映射信息\n");
+    // prompt.push_str("   - 示例：docker-compose ps --format json | jq '.[] | {name, ports}'\n");
+    // prompt.push_str("   - 或：docker port {container_name} 80\n");
     prompt.push_str("\n");
     // prompt.push_str("6. **注册 MCP 工具**：根据代码类型注册相应的 MCP 工具\n"); 
     // prompt.push_str("   - 使用 execute_command 工具在容器内执行注册命令\n");
@@ -651,7 +700,7 @@ pub fn generate_llm_deployment_prompt(context: &ProjectDeploymentContext) -> Str
     // prompt.push_str("   - 使用 file_reader 工具读取配置文件（package.json, requirements.txt, go.mod 等类似的配置文件）\n");
     // prompt.push_str("   - 根据检测结果安装必要的依赖\n");
     prompt.push_str("\n");
-    prompt.push_str("4. **安装依赖和启动应用**：根据代码类型安装必要软件并启动应用\n");
+    prompt.push_str("4. **安装依赖和启动应用**：根据代码类型安装必要软件并启动应用，特别注意编译项目需要的安装环境，编译环境以及运行环境。\n");
     prompt.push_str("   - 使用 execute_command 工具执行安装命令\n");
     // prompt.push_str("   - 使用 build_check 工具检测编译结果，此工具也不知道存在与否，如果不存在，需要你自己根据execute_command进行检测\n");
     // prompt.push_str("   - 使用 port_check 工具检查应用端口是否正常监听\n");
@@ -729,16 +778,28 @@ impl ContainerDeployer {
             project_files,
             container_name: String::new(),
             mcp_server_url: String::new(),
+            debug_dir: debug_dir.clone(),
         };
 
         let compose_config = generate_docker_compose_config(&context, &dockerfile_names);
         let compose_path = write_docker_compose(&debug_dir, &compose_config)?;
 
+        let repo = WorkspaceRepository::new();
         for config in &container_configs {
             if config.container_name == "docker-compose.yml" {
                 continue;
             }
-            write_project_files_to_volume(user_id, project_id, &config.container_name, &context.project_files)?;
+
+            match repo.get_container_files_for_deployment(project_id, config.id).await {
+                Ok(container_files) => {
+                    write_project_files_to_volume(user_id, project_id, &config.container_name, &container_files)?;
+                    println!("[deploy_project] Wrote {} files to container {}", container_files.len(), config.container_name);
+                }
+                Err(e) => {
+                    println!("[deploy_project] Failed to get files for container {}: {}, using all files as fallback", config.container_name, e);
+                    write_project_files_to_volume(user_id, project_id, &config.container_name, &context.project_files)?;
+                }
+            }
         }
 
         Ok(ContainerDeploymentResult {
@@ -776,6 +837,7 @@ impl ContainerDeployer {
                         let parts: Vec<&str> = line.split(":").collect();
                         if parts.len() >= 2 {
                             let container_name = parts[1].trim().replace("\"", "").replace("'", "");
+                            println!("remove container {}",container_name.clone());
                             if !container_name.is_empty() {
                                 let _ = Command::new("docker")
                                     .arg("rm")
@@ -790,6 +852,7 @@ impl ContainerDeployer {
                             let network_name = parts[0].trim();
                             if !network_name.is_empty() && network_name != "external" && network_name != "name" && network_name != "driver" {
                                 let full_network_name = format!("{}_{}", compose_project_name, network_name);
+                                println!("remove network: {}",full_network_name.clone());
                                 let _ = Command::new("docker")
                                     .arg("network")
                                     .arg("rm")
@@ -933,29 +996,28 @@ impl ContainerDeployer {
 
         // 3. 从容器 MCP-SSE 服务动态获取工具列表
         // 工具列表完全从容器获取，不使用写死的 fallback，因为工具会更新
-        let tool_executor = ToolExecutor::new(HashMap::new(), &mcp_server_url);
+        let tool_executor = ToolExecutor::new(HashMap::new(), &mcp_server_url, None);
         println!("[DEBUG] ToolExecutor created with URL: {}", mcp_server_url);
         let mut count = 0;
-        let max_attempts = 5;
+        //尝试3分钟
+        let max_attempts = 60;
         loop {
-            tokio::select! {
-                result = tool_executor.list_tools(None) => {
-                        match result {
-                            Ok(t) => {
-                            println!("[DEBUG] Retrieved {} tools from container MCP-SSE", t.len());
-                            break;
-                        },
-                        Err(e) => {
-                            println!("[DEBUG] Failed to get tools from container: {}", e);
-                        }
+                let result = tool_executor.list_tools(None).await;
+                match result {
+                Ok(t) => {
+                    println!("[DEBUG] Retrieved {} tools from container MCP-SSE", t.len());
+                    break;
+                },
+                Err(e) => {
+                    println!("[DEBUG] Failed to get tools from container: {}", e);
+
+                    //每个一秒检测一次工具列表是否可用
+                    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                    count += 1;
+                    if count >= max_attempts {
+                        break;
                     }
                 }
-                //每个一秒检测一次工具列表是否可用
-               _ = tokio::time::sleep(tokio::time::Duration::from_secs(1)) => {}
-            }
-            count += 1;
-            if count >= max_attempts {
-                break;
             }
         }
         let tools = match tool_executor.list_tools(None).await {
@@ -986,6 +1048,13 @@ impl ContainerDeployer {
                 name: None,
                 tool_calls: None,
             },
+              ChatMessage {
+                role: "system".to_string(),
+                content: Some("[TOOL USAGE RULE] 当你使用 execute_command 执行命令时，首选确定 command 命令存在，例如 mvn 命令，首先通过 whereis mvn 查看是否存在，如果不存在，需要你通过系统命令 apt install <package-name> 安装命令。".to_string()),
+                tool_call_id: None,
+                name: None,
+                tool_calls: None,
+            },
             ChatMessage {
                 role: "system".to_string(),
                 content: Some("[TOOL FUNCTION SCHEMA]  {\"name\":\"execute_command\",\"description\":\"Executes a system command and returns the output.  requires \\u0060command\\u0060 and \\u0060workDir\\u0060.the command is the \\u0060command\\u0060 you want to execute, the \\u0060workDir\\u0060 is the command executing in the /app directory or other effective directory.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"command\":{\"description\":\"the command to execute\",\"type\":\"string\"},\"workDir\":{\"description\":\"working directory\",\"type\":\"string\"}},\"required\":[\"command\",\"workDir\"]}}) ".to_string()),
@@ -993,13 +1062,7 @@ impl ContainerDeployer {
                 name: None,
                 tool_calls: None,
             },
-             ChatMessage {
-                role: "system".to_string(),
-                content: Some("[TOOL FUNCTION SCHEMA]  {\"name\":\"execute_command\",\"description\":\"Executes a system command and returns the output.  requires \\u0060command\\u0060 and \\u0060workDir\\u0060.the command is the \\u0060command\\u0060 you want to execute, the \\u0060workDir\\u0060 is the command executing in the /app directory or other effective directory.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"command\":{\"description\":\"the command to execute\",\"type\":\"string\"},\"workDir\":{\"description\":\"working directory\",\"type\":\"string\"}},\"required\":[\"command\",\"workDir\"]}}) ".to_string()),
-                tool_call_id: None,
-                name: None,
-                tool_calls: None,
-            },
+           
             ChatMessage {
                 role: "user".to_string(),
                 content: Some(prompt),
@@ -1016,7 +1079,7 @@ impl ContainerDeployer {
         let mcp_servers: HashMap<i64, String> = HashMap::new();
         let mut stream = llm_client
             .chat_with_tools(messages, Some(&tools), mcp_servers, &mcp_server_url, 10
-                , context.user_id, context.project_id, None)
+                , context.user_id, context.project_id, None, Some(context.debug_dir.clone()))
             .await
             .map_err(|e| format!("LLM chat_with_tools failed: {}", e))?;
 

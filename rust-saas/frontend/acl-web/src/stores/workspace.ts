@@ -240,11 +240,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-   const saveProjectContainerConfigs = async (projectId: number, configs: ProjectContainerConfig[]) => {
+   const saveProjectContainerConfigs = async (projectId: number, configs: ProjectContainerConfig[], fetch: boolean) => {
     loading.value = true
     error.value = null
     try {
-      await workspaceService.saveProjectContainerConfigs(projectId, configs)
+      await workspaceService.saveProjectContainerConfigs(projectId, configs, fetch)
       projectContainerConfigs.value = configs
     } catch (err: unknown) {
       error.value = err instanceof Error ? err.message : 'Failed to save project container configs'

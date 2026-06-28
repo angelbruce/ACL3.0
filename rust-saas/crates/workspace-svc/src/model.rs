@@ -20,3 +20,9 @@ impl UserSession {
         }
     }
 }
+
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SaveProjectConfigPathRarams {
+    pub fetch : bool,
+}

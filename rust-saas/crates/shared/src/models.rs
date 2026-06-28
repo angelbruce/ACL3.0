@@ -1224,3 +1224,81 @@ pub struct UpdateRoleRequest {
     pub description: Option<String>,
     pub is_super_admin: Option<bool>,
 }
+
+// ============================================
+// 文件容器分配相关模型
+// ============================================
+
+#[derive(Debug, Serialize, Deserialize, Clone, Queryable, Selectable)]
+#[diesel(table_name = crate::schema::project_file_container_assignments)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct FileContainerAssignment {
+    pub id: i64,
+    pub project_id: i64,
+    pub file_id: i64,
+    pub container_config_id: i64,
+    pub file_path: String,
+    pub assigned_by: String,
+    pub confidence_score: f64,
+    pub assignment_reason: Option<String>,
+    pub created_at: NaiveDateTime,
+    pub updated_at: NaiveDateTime,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Insertable)]
+#[diesel(table_name = crate::schema::project_file_container_assignments)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewFileContainerAssignment {
+    pub project_id: i64,
+    pub file_id: i64,
+    pub container_config_id: i64,
+    pub file_path: String,
+    pub assigned_by: String,
+    pub confidence_score: f64,
+    pub assignment_reason: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct FileAssignmentRequest {
+    pub project_id: i64,
+    pub file_id: i64,
+    pub container_config_ids: Vec<i64>,
+    pub file_path: String,
+    pub assignment_reason: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct LlmFileAssignmentRequest {
+    pub project_id: i64,
+    pub files: Vec<FileAssignmentInfo>,
+    pub container_configs: Vec<ContainerConfigInfo>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct FileAssignmentInfo {
+    pub file_id: i64,
+    pub file_path: String,
+    pub file_content: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ContainerConfigInfo {
+    pub config_id: i64,
+    pub container_name: String,
+    pub working_dir: String,
+    pub tags: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct LlmFileAssignmentResponse {
+    pub assignments: Vec<FileAssignmentResult>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct FileAssignmentResult {
+    pub file_id: i64,
+    pub file_path: String,
+    pub container_config_ids: Vec<i64>,
+    pub confidence_score: f64,
+    pub assignment_reason: String,
+}

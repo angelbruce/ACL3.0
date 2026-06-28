@@ -87,4 +87,16 @@ impl From<uuid::Error> for ServiceError {
     }
 }
 
+impl From<String> for ServiceError {
+    fn from(e: String) -> Self {
+        ServiceError::InternalError
+    }
+}
+
+impl From<&str> for ServiceError {
+    fn from(e: &str) -> Self {
+        ServiceError::InternalError
+    }
+}
+
 pub type ServiceResult<T> = Result<T, ServiceError>;

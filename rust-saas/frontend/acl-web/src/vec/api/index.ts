@@ -1,0 +1,10 @@
+export { default as vecClient } from './client';
+export * from './document';
+export * from './search';
+export * from './graph';
+export * from './taxonomy';
+export * from './boundary';
+export * from './analytics';
+export * from './version';
+export * from './task';
+export * from './import_export';

@@ -4,6 +4,8 @@ import { RouterView, useRouter, useRoute } from 'vue-router'
 import {
   MessageSquare, Bot, Workflow, Settings, Wrench, LogOut, Menu, X, Server, Cpu,
   Users, Building, Shield, Key, FolderTree, FolderOpen, ClipboardList, Bell,
+  BookOpen, Search, FileText, GitFork, FlaskConical, Tags, ShieldCheck, BarChart3,
+  History, ListTodo, ArrowLeftRight,
 } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores'
 
@@ -15,9 +17,25 @@ const sidebarOpen = ref(true)
 const sidebarCollapsed = ref(false)
 const adminExpanded = ref(false)
 const configExpanded = ref(false)
+const vecExpanded = ref(false)
+const aiExpanded = ref(false)
+
+const vecNavItems = [
+  { path: '/vec', name: '仪表盘', icon: BookOpen },
+  { path: '/vec/search', name: '搜索', icon: Search },
+  { path: '/vec/documents', name: '文档管理', icon: FileText },
+  { path: '/vec/graph', name: '知识图谱', icon: GitFork },
+  { path: '/vec/distillation', name: '知识蒸馏', icon: FlaskConical },
+  { path: '/vec/taxonomy', name: '知识分类', icon: Tags },
+  { path: '/vec/boundary', name: '知识边界', icon: ShieldCheck },
+  { path: '/vec/analytics', name: '数据分析', icon: BarChart3 },
+  { path: '/vec/version', name: '版本管理', icon: History },
+  { path: '/vec/tasks', name: '任务管理', icon: ListTodo },
+  { path: '/vec/import-export', name: '导入导出', icon: ArrowLeftRight },
+]
 
 const navItems = [
-  { path: '/sessions', name: '探索中心', icon: MessageSquare },
+  { path: '/sessions', name: '探索', icon: MessageSquare },
   { path: '/workspace', name: '工作区', icon: FolderOpen },
   { path: '/flows', name: '自动化', icon: Workflow },
   { path: '/agents', name: '智能仓库', icon: Bot },
@@ -89,8 +107,8 @@ const toggleSidebar = () => {
         </div>
 
         <!-- Navigation -->
-        <nav class="flex-1 py-4 px-2 space-y-0.5">
-          <router-link
+        <nav class="flex-1 px-2 space-y-0.5 overflow-auto">
+          <!-- <router-link
             v-for="item in navItems"
             :key="item.path"
             :to="item.path"
@@ -104,12 +122,68 @@ const toggleSidebar = () => {
             :title="sidebarCollapsed ? item.name : undefined"
           >
             <component :is="item.icon" class="w-5 h-5 flex-shrink-0" />
-            <span v-if="!sidebarCollapsed" class="text-sm">{{ item.name }}</span>
-          </router-link>
+          <span v-if="!sidebarCollapsed" class="text-sm">{{ item.name }}</span>
+        </router-link> -->
+
+        <!-- AI  Base Section -->
+        <div v-if="!sidebarCollapsed" class="border-surface-200">
+          <button
+            @click="aiExpanded = !aiExpanded"
+            class="w-full flex items-center gap-3 px-3 py-2.5 text-surface-500 hover:text-surface-700 hover:bg-surface-50 transition-all duration-150"
+          >
+            <BookOpen class="w-5 h-5 flex-shrink-0" />
+            <span class="text-sm flex-1 text-left">智能中心</span>
+            <span :class="['transform transition-transform', aiExpanded ? 'rotate-180' : '']">▼</span>
+          </button>
+          <div v-show="aiExpanded" class="mt-1 space-y-0.5 pl-4  border-surface-100  border-t">
+            <router-link
+              v-for="item in navItems"
+              :key="item.path"
+              :to="item.path"
+              :class="[
+                'flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-150 text-sm',
+                isActive(item.path)
+                  ? 'bg-primary-50 text-primary-600 font-medium'
+                  : 'text-surface-500 hover:text-surface-700 hover:bg-surface-50',
+              ]"
+            >
+              <component :is="item.icon" class="w-4 h-4 flex-shrink-0" />
+              <span>{{ item.name }}</span>
+            </router-link>
+          </div>
+        </div>
+
+        <!-- VEC Knowledge Base Section -->
+        <div v-if="!sidebarCollapsed" class="mt-4 border-t border-surface-200">
+          <button
+            @click="vecExpanded = !vecExpanded"
+            class="w-full flex items-center gap-3 px-3 py-2.5 text-surface-500 hover:text-surface-700 hover:bg-surface-50 rounded-lg transition-all duration-150"
+          >
+            <BookOpen class="w-5 h-5 flex-shrink-0" />
+            <span class="text-sm flex-1 text-left">知识库</span>
+            <span :class="['transform transition-transform', vecExpanded ? 'rotate-180' : '']">▼</span>
+          </button>
+          <div v-show="vecExpanded" class="mt-1 space-y-0.5 pl-4  border-surface-100  border-t">
+            <router-link
+              v-for="item in vecNavItems"
+              :key="item.path"
+              :to="item.path"
+              :class="[
+                'flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-150 text-sm',
+                isActive(item.path)
+                  ? 'bg-primary-50 text-primary-600 font-medium'
+                  : 'text-surface-500 hover:text-surface-700 hover:bg-surface-50',
+              ]"
+            >
+              <component :is="item.icon" class="w-4 h-4 flex-shrink-0" />
+              <span>{{ item.name }}</span>
+            </router-link>
+          </div>
+        </div>
 
           
             <!-- Config Section -->
-          <div v-if="!sidebarCollapsed" class="pt-4 mt-4 border-t border-surface-200">
+          <div v-if="!sidebarCollapsed" class="mt-4 border-t border-surface-200">
             <button
               @click="configExpanded = !configExpanded"
               class="w-full flex items-center gap-3 px-3 py-2.5 text-surface-500 hover:text-surface-700 hover:bg-surface-50 rounded-lg transition-all duration-150"
@@ -118,7 +192,7 @@ const toggleSidebar = () => {
               <span class="text-sm flex-1 text-left">配置管理</span>
               <span :class="['transform transition-transform', configExpanded ? 'rotate-180' : '']">▼</span>
             </button>
-            <div v-show="configExpanded" class="mt-1 space-y-0.5 pl-4">
+            <div v-show="configExpanded" class="mt-1 space-y-0.5 pl-4  border-surface-100  border-t">
               <router-link
                 v-for="item in configNavItems"
                 :key="item.path"
@@ -137,7 +211,7 @@ const toggleSidebar = () => {
           </div>
 
           <!-- Admin Section -->
-          <div v-if="!sidebarCollapsed" class="pt-4 mt-4 border-t border-surface-200">
+          <div v-if="!sidebarCollapsed" class="mt-4 border-t border-surface-200">
             <button
               @click="adminExpanded = !adminExpanded"
               class="w-full flex items-center gap-3 px-3 py-2.5 text-surface-500 hover:text-surface-700 hover:bg-surface-50 rounded-lg transition-all duration-150"
@@ -146,7 +220,7 @@ const toggleSidebar = () => {
               <span class="text-sm flex-1 text-left">系统管理</span>
               <span :class="['transform transition-transform', adminExpanded ? 'rotate-180' : '']">▼</span>
             </button>
-            <div v-show="adminExpanded" class="mt-1 space-y-0.5 pl-4">
+            <div v-show="adminExpanded" class="mt-1 space-y-0.5 pl-4  border-surface-100  border-t">
               <router-link
                 v-for="item in adminNavItems"
                 :key="item.path"

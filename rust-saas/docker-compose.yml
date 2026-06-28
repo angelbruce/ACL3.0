@@ -1,6 +1,66 @@
 version: '3.8'
 
 services:
+
+# 1. Milvus Core Service
+
+  milvus:
+    image: milvusdb/milvus:v2.4.0
+    container_name: acl-milvus
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    environment:
+      - ETCD_ENDPOINTS=etcd:2379
+      - MINIO_ADDRESS=minio:9000
+    command: ["milvus", "run", "standalone"]
+    volumes:
+      - milvus_data:/var/lib/milvus
+    depends_on:
+      - etcd
+      - minio
+    restart: unless-stopped
+
+# 2. Etcd Service (分布式协调和配置)
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    container_name: acl-etcd
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    volumes:
+      - etcd_data:/etcd
+    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+  # 3. MinIO Service (对象存储，用于存储向量数据)
+  minio:
+    image: minio/minio:latest
+    container_name: acl-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+
+
+  # POSTGRES Service
   postgres:
     image: postgres:16-alpine
     container_name: acl-postgres
@@ -18,6 +78,8 @@ services:
       timeout: 5s
       retries: 5
 
+
+  # redis Service
   redis:
     image: redis:7-alpine
     container_name: acl-redis
@@ -179,29 +241,66 @@ services:
       redis:
         condition: service_healthy
 
+  # 暂时不用，尚未支持streamable http tools fetch.
+  # mcp-provider-svc:
+  #   build:
+  #     context: .
+  #     dockerfile: ./crates/mcp-provider-svc/Dockerfile
+  #   container_name: acl-mcp-provider-svc
+  #   ports:
+  #     - "8088:8088"
+  #   environment:
+  #     - PORT=8088
+  #     - DATABASE_URL=postgres://admin:password@postgres:5432/acl_db
+  #     - REDIS_URL=redis://redis:6379/0
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
 
-
-  mcp-provider-svc:
+  # Vector Service
+  vec-svc:
     build:
       context: .
-      dockerfile: ./crates/mcp-provider-svc/Dockerfile
-    container_name: acl-mcp-provider-svc
+      dockerfile: ./crates/vec-svc/Dockerfile
+    container_name: acl-vec-svc
     ports:
-      - "8088:8088"
+      - "8089:8080"
     environment:
-      - PORT=8088
+      - RUST_LOG=info
       - DATABASE_URL=postgres://admin:password@postgres:5432/acl_db
-      - REDIS_URL=redis://redis:6379/0
+      - MILVUS_HOST=milvus
+      - MILVUS_PORT=19530
+      - MINIO_ENDPOINT=http://minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+      - MINIO_BUCKET=documents
+      # Embedding 模型配置（启动时固定）
+      - EMBEDDING_MODEL_NAME=gemma-4-E4B-it
+      - EMBEDDING_MODEL_PATH=/models/gemma-4-E4B-it-Q4_0.gguf
+      - EMBEDDING_DIM=2560
+    volumes:
+      # 模型文件挂载（只读）
+      - ${MODEL_PATH:-./models}:/models:ro
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
-        condition: service_healthy
+      milvus:
+        condition: service_started
+      minio:
+        condition: service_started
+    restart: unless-stopped
 
+# volume list
 volumes:
+  milvus_data:
+  minio_data:
   postgres_data:
   redis_data:
   workspace_storage:
+  etcd_data:
+
 
 # 构建配置
 x-build-args:

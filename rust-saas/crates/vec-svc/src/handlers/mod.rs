@@ -1,0 +1,29 @@
+//! API Handlers
+
+pub mod search;
+pub mod document;
+pub mod embedding;
+pub mod distillation;
+pub mod taxonomy;
+pub mod boundary;
+pub mod storage;
+pub mod task;
+pub mod knowledge_graph;
+pub mod verification;
+pub mod analytics;
+pub mod version;
+pub mod import_export;
+
+pub use search::*;
+pub use document::*;
+pub use embedding::*;
+pub use distillation::*;
+pub use taxonomy::*;
+pub use boundary::*;
+pub use storage::*;
+pub use task::*;
+pub use knowledge_graph::*;
+pub use verification::*;
+pub use analytics::*;
+pub use version::*;
+pub use import_export::*;

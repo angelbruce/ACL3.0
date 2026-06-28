@@ -1,0 +1,46 @@
+version: '3.8'
+#词向量数据库，用来进行RAG任务，检索任务，推荐任务。
+services:
+  # 1. Milvus Core Service
+  milvus:
+    image: milvusdb/milvus:2.6-20260622-e5ef2b59
+    container_name: milvus_core
+    environment:
+      - MILVUS_NODE_TYPE=standalone
+      - MILVUS_STORAGE_PATH=/var/milvus/data
+    volumes:
+      - milvus_data:/var/milvus/data
+    ports:
+      - "19530:19530" # Milvus API Port
+    depends_on:
+      - etcd
+      - minio
+    restart: always
+
+  etcd:
+    image: milvusdb/etcd # <-- 替换为 milvusdb 官方镜像
+    container_name: milvus_etcd
+    environment:
+      - ALLOW_NONE_AUTHENTICATION=yes 
+    ports:
+      - "2379:2379"
+    restart: always
+
+
+  # 3. MinIO Service (对象存储，用于存储向量数据)
+  minio:
+    image: minio/minio:latest
+    container_name: milvus_minio
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_PASSWORD=minioadmin
+    ports:
+      - "9000:9000"
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001" # 启动 MinIO 服务和 Console
+    restart: always
+
+volumes:
+  milvus_data:
+  minio_data:
