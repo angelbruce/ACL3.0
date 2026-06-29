@@ -11,26 +11,33 @@
       </div>
     </div>
 
-    <div class="flex flex-1  flex-col"  id="ddd">
+    <div class="flex flex-1  flex-col" id="ddd">
         <div class="h-14 bg-gray-50 border-b flex items-center justify-between px-4">
           <input v-model="flowName" type="text" placeholder="请输入工作流名称"
             class="flex-1 max-w-md px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-blue-500" />
           <div class="flex gap-2">
             <button @click="doConnect"
-              class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors">
-              连接
+              class="px-4 py-2 btn btn-primary rounded-lg hover:bg-blue-600 transition-colors">
+              <el-tooltip content="连接" placement="top"><link-icon class="w-4 h-4" /></el-tooltip>
             </button>
             <button @click="deleteSelected"
-              class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors">
-              删除
+              class="px-4 py-2 btn btn-primary rounded-lg hover:bg-red-600 transition-colors">
+              <el-tooltip content="删除" placement="top"><delete-icon class="w-4 h-4" /></el-tooltip>
+            </button>
+             <button @click="handleSubmit"
+              class="px-4 py-2 btn btn-primary rounded-lg  hover:bg-green-600 transition-colors">
+              <el-tooltip content="保存" placement="top"><save-icon class="w-4 h-4" /></el-tooltip>
             </button>
             <button @click="router.push('/flows')"
-              class="px-4 py-2 bg-white text-black rounded-lg border border-gray-300 hover:bg-white-500 transition-colors">
-              取消
+              class="px-4 py-2 btn btn-primary rounded-lg border border-gray-300 hover:bg-white-500 transition-colors">
+             <el-tooltip content="取消" placement="top"><shield-close-icon class="w-4 h-4" /></el-tooltip>
             </button>
-            <button @click="handleSubmit"
-              class="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors">
-              保存
+           
+            <button
+              @click="router.push(`/flows/${flowId}/run`)"
+              class="btn btn-primary flex items-center gap-2 text-sm rounded-lg hover:bg-white-500 transition-colors"
+            >
+              <el-tooltip content="执行" placement="top"><play-icon class="w-4 h-4" /></el-tooltip>
             </button>
           </div>
       </div>
@@ -45,21 +52,21 @@
               <div class="flex items-center justify-start align-left text-lg font-bold text-gray-800">
                 <b><label id="node" v-bind="current.value"></label></b>
               </div>
-                <div class="flex items-center text-sm align-left text-gray-800">Agent</div>
+                <div class="flex items-center text-sm align-left text-gray-800 font-bold">Agent</div>
                 <select class="flex w-full px-2 py-1 border border-gray-300  text-sm rounded-md" v-model="current.agent">
                   <option v-for="agent in agents" :key="agent.id" :value="agent.id">{{ agent.name }}</option>
                 </select>
               
-                <div class="flex items-center text-sm align-left text-gray-800">角色定义</div>
-                <textarea class="flex align-left w-full px-2 py-1 border border-gray-300 rounded-md " v-model="current.prompt" style="min-height:100px;"></textarea>
+                <div class="flex items-center text-sm align-left text-gray-800 font-bold">角色定义</div>
+                <textarea class="flex align-left w-full px-2 py-1 border border-gray-300 rounded-md text-sm h-48" v-model="current.prompt" ></textarea>
 
-                <div class="flex w-full align-left items-center text-sm align-left text-gray-800">完成路径</div>
+                <div class="flex w-full align-left items-center text-sm align-left text-gray-800 font-bold">完成路径</div>
                 <div class="flex w-full  align-left items-center text-sm align-left text-gray-800 border-b  border-gray-100" v-for="path in current.fromPaths" :key="path.id">
                   <input class="mx-2" type="checkbox" :id="path.id" :name="path.id" :value="path.id" v-model="path.checked">
-                  <label for="path.id">{{ path.src.value }} -> {{ path.value }}</label>
+                  <label for="path.id" >{{ path.src.value }} -> {{ path.value }}</label>
                 </div>
 
-                <div class="flex w-full align-left items-center text-sm align-left text-gray-800">完成度</div>
+                <div class="flex w-full align-left items-center text-sm align-left text-gray-800 font-bold">完成度</div>
                 <select class="flex w-full px-2 py-1 border border-gray-300 rounded-md text-sm " v-model="current.degree">
                     <option value="100">所有完成</option>
                     <option value="1">任何一项</option>
@@ -75,12 +82,14 @@
 import { loadmodule } from '@/utils/mx.js';
 
 onMounted(async () => {
-  await loadmodule();
+   loadmodule().then(()=>{
+     waitForMxGraph(loadAll);
+   })
 });
 
 import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router'
-import { Play, Circle, GitBranch, Square, CircleDot, ArrowBigUp } from 'lucide-vue-next';
+import { Play, Circle, GitBranch, Square, CircleDot, ArrowBigUp, ArrowBigDown, CircleDashed, CircleIcon, PlayIcon, SaveIcon, ShieldCloseIcon, DeleteIcon, Link2Icon, LinkIcon } from 'lucide-vue-next';
 import { useFlowStore,useAgentStore } from '@/stores';
 import { PathStore, NodeInfo, Edge, FlowData, PathInfo, Style, NodeInfoEx ,nodeTypes} from '@/views/flows/PathStore';
 const route = useRoute()
@@ -123,17 +132,21 @@ const nextNodeId = () => {
 };
 const getButtonClass = (type: string) => {
   const classes: Record<string, string> = {
-    start: 'bg-green-500',
-    agent: 'bg-yellow-500',
-    terminate: 'bg-blue-500',
-    end: 'bg-red-500',
+    start: 'bg-[#ffddaa] border border-gray-500',
+    agent: 'bg-[#3aeafa] border border-gray-500',
+    input: 'bg-white border border-gray-500',
+    output: 'bg-[#eaeaea] border border-gray-300',
+    terminate: 'bg-[#eedd33] border border-gray-300',
+    end: 'bg-[#112233] border border-gray-300',
   };
   return classes[type] || 'bg-gray-500';
 };
 const getNodeIcon = (type: string) => {
   const icons: Record<string, any> = {
-    start: Play,
+    start: CircleIcon,
     agent: Square,
+    input: ArrowBigUp,
+    output: ArrowBigDown,
     terminate: CircleDot,
     end: Circle,
   };
@@ -142,9 +155,12 @@ const getNodeIcon = (type: string) => {
 const addNode = (type: string) => {
   if (!graph)
     return;
-  const label = type === 'start' ? '开始' : type === 'end' ? '结束' : type === 'terminate' ? '终止' : '动作';
-  const w = type === 'start' || type === 'end' ? 40 : NODE_W;
-  const h = type === 'start' || type === 'end' ? 40 : NODE_H;
+  const label = type === 'start' ? '开始' : type === 'end' ? '结束' : type === 'terminate' ? '终止' : type === 'input' ? '输入' : type === 'output' ? '输出' : '动作';
+  let w = type === 'start' || type === 'end' ? 60 : NODE_W;
+  let h = type === 'start' || type === 'end' ? 60 : NODE_H;
+  w = type === 'input' || type === 'output' ? 60 : w;
+  h = type === 'input' || type === 'output' ? 60 : h;
+  
   const id = nextNodeId();
   const style = getNodeStyle(type);
   const parent = graph.getDefaultParent();
@@ -159,7 +175,9 @@ const addNode = (type: string) => {
 const getNodeStyle = (type: string): string => {
   const styles: Record<string, string> = {
     start: 'shape=ellipse;fillColor=#ffddaa;strokeColor=#3366aa;lineWidth=2;rounded=2;fontColor=#000000;type=start;',
-    agent: 'fillColor=#eac133;strokeColor=#6666aa;lineWidth=2;rounded=2;fontColor=#000000;type=agent;',
+    agent: 'fillColor=#5aeafa;strokeColor=#6666aa;lineWidth=2;rounded=2;fontColor=#000000;type=agent;',
+    input: 'shape=ellipse;fillColor=#fafafa;strokeColor=#6666aa;lineWidth=2;rounded=2;fontColor=#000000;type=input;',
+    output: 'shape=ellipse;fillColor=#eaeaea;strokeColor=#6666aa;lineWidth=2;rounded=2;fontColor=#000000;type=output;',
     terminate: 'shape=ellipse;fillColor=#eedd33;strokeColor=#3366aa;lineWidth=2;rounded=2;fontColor=#000000;type=terminate;',
     end: 'shape=ellipse;fillColor=#112233;strokeColor=#3366aa;lineWidth=2;rounded=2;fontColor=#ffffff;type=end;',
   };
@@ -190,23 +208,29 @@ const doConnect = () => {
     }
     const ltype = getCellNodeType(last);
     const ntype = getCellNodeType(node);
+  
+
     if (ltype !== '' && ntype !== '' && ltype !== 'agent' && ntype !== 'agent') {
       if (ltype === ntype) {
         last = node;
         continue;
       }
     }
+
     let from = last;
     let to = node;
-    if ((ltype === 'agent' && (ntype !== 'agent' && ntype !== 'terminate' && ntype !== 'end')) ||
-      (ltype !== 'start' && ntype === 'start') ||
-      (ltype === 'end' && ntype !== 'end')) {
-      from = node;
-      to = last;
+    if(ltype !== 'input' && ntype !== 'input' && ltype !== 'output' && ntype !== 'output') {
+      if ((ltype === 'agent' && (ntype !== 'agent' && ntype !== 'terminate' && ntype !== 'end')) ||
+        (ltype !== 'start' && ntype === 'start') ||
+        (ltype === 'end' && ntype !== 'end')) {
+        from = node;
+        to = last;
+      }
     }
-
     let value = '下一步';
     if (ltype === 'agent' || ntype === 'agent') value = '下一步';
+    if(ltype == 'input' || ltype == 'output') value = '输入';
+    if(ntype == 'input' || ntype == 'output') value = '输出';
     const lineStyle = 'strokeWidth=1;strokeColor=#6b7280;endArrow=classic;endFill=true;';
     graph.insertEdge(parent, null, value, from, to, lineStyle);
     last = node;
@@ -302,17 +326,20 @@ const initGraph = () => {
   const connHandler = new mxConnectionHandler(graph);
   connHandler.setEnabled(false);
   new mxKeyHandler(graph);
-  const parent = graph.getDefaultParent();
-  const startStyle = 'shape=ellipse;fillColor=#ffddaa;strokeColor=#3366aa;lineWidth=2;rounded=2;fontColor=#000000;type=start;';
-  nodeStart = graph.insertVertex(parent, 'start', '开始', 50, 200, 60, 60, startStyle);
+
   
   if (props.flowData) {
     loadFlow(props.flowData);
-  }
+  } 
 };
 const loadFlow = (data: FlowData) => {
   if (!graph) return;
-  if(!data) return;
+  if(!data) {
+    const parent = graph.getDefaultParent();
+    const startStyle = 'shape=ellipse;fillColor=#ffddaa;strokeColor=#3366aa;lineWidth=2;rounded=2;fontColor=#000000;type=start;';
+    nodeStart = graph.insertVertex(parent, 'start', '开始', 50, 200, 60, 60, startStyle);
+    return;
+  }
 
   console.log(data)
   
@@ -324,8 +351,13 @@ const loadFlow = (data: FlowData) => {
   let verMap:Record<string, any> = {};
   data.vertices.forEach((v) => {
     const style = getNodeStyle(v.type);
-    const w = v.type === 'start' || v.type === 'end' ? 60 : NODE_W;
-    const h = v.type === 'start' || v.type === 'end' ? 60 : NODE_H;
+    let w = v.type === 'start' || v.type === 'end' ? 60 : NODE_W;
+    let h = v.type === 'start' || v.type === 'end' ? 60 : NODE_H;
+    w = v.type === 'input' || v.type === 'output' ? 60 : w;
+    h = v.type === 'input' || v.type === 'output' ? 60 : h;
+    if(v.w) w = v.w;
+    if(v.h) h = v.h;
+
     var cell = graph.insertVertex(parent, v.id, v.value || '', v.x || 150, v.y || 120, w, h, style);
     verMap[cell.id] = cell;
   });
@@ -395,6 +427,8 @@ const exportFlow = (): FlowData => {
         paths: node.paths || [],
         x: geometry?.x || 0,
         y: geometry?.y || 0,
+        w: geometry?.width || 0,
+        h: geometry?.height || 0,
       });
     }
     else if (cell.isEdge() && cell.getParent() === parent) {
@@ -421,10 +455,11 @@ const exportFlow = (): FlowData => {
 };
 
 const waitForMxGraph = (callback: () => void) => {
+  console.log('waitForMxGraph')
   if ((window as any).mxGraph) {
     callback();
   } else { 
-    setTimeout(() => waitForMxGraph(callback), 1000);
+    setTimeout(() => waitForMxGraph(callback), 10);
  }
 };
 
@@ -448,11 +483,12 @@ const loadFlowData = ()=> {
   }
 };
 
-onMounted(() => {
- waitForMxGraph(loadAll);
-});
 
+const loaed = ref (false);
 const loadAll = ()=> {
+  if(loaed.value) return;
+  loaed.value = true;
+  console.log('loadAll')
   initGraph();
   loadFlowData();
 }

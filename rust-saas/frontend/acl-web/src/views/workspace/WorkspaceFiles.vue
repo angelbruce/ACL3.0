@@ -2,7 +2,8 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { Plus, X, Trash2, FileText, Loader2, Edit2, Code } from 'lucide-vue-next'
-import { useWorkspaceStore, type Project, type ProjectPurpose, type CreateProjectRequest } from '@/stores/workspace'
+import { useWorkspaceStore, } from '@/stores/workspace'
+import { ProjectPurpose, CreateProjectRequest,Project } from '@/types/index'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 
 const router = useRouter()
@@ -25,13 +26,23 @@ const getPurposeIcon = (purpose: ProjectPurpose) => {
 }
 
 const getPurposeColor = (purpose: ProjectPurpose) => {
-  return purpose === 'article' 
-    ? 'from-blue-100 to-blue-200 text-blue-500' 
-    : 'from-green-100 to-green-200 text-green-500'
+  switch (purpose) {
+    case 'education': return 'from-orange-100 to-orange-200 text-orange-500'
+    case 'article': return 'from-blue-100 to-blue-200 text-blue-500'
+    case 'coding': return 'from-green-100 to-green-200 text-green-500'
+    case 'mcp': return 'from-cyan-100 to-cyan-200 text-cyan-500'
+    default: return ''
+  }
 }
 
 const getPurposeLabel = (purpose: ProjectPurpose) => {
-  return purpose === 'article' ? '文章创作' : '代码开发'
+  switch (purpose) {
+    case 'article': return '文章创作'
+    case 'coding': return '代码开发'
+    case 'education': return '教育'
+    case 'mcp': return 'MCP'
+    default: return '未知'
+  }
 }
 
 const fetchProjects = async () => {
@@ -56,7 +67,7 @@ const handleCreateProject = async () => {
   try {
     const request: CreateProjectRequest = {
       name: newProjectName.value,
-      purpose: newProjectPurpose.value,
+      purpose: type.value,
       description: newProjectDescription.value || undefined,
     }
     const project = await workspaceStore.createProject(request)
@@ -64,6 +75,7 @@ const handleCreateProject = async () => {
     showCreateModal.value = false
     newProjectName.value = ''
     newProjectDescription.value = ''
+  
     error.value = ''
   } catch (e: any) {
     error.value = e?.response?.data?.message || '创建项目失败'
@@ -104,6 +116,15 @@ const handleSelectProject = (project: Project) => {
   currentProject.value = project
 }
 
+
+const type = ref<ProjectPurpose>('education')
+
+const categoryProjects = computed(() => {
+  if(projects.value === null || projects.value.length === 0) return []
+  var filterProjects = projects.value.filter((project) => project.purpose === type.value)
+  return filterProjects ||[]
+})
+
 const formatDate = (dateStr: string) => {
   return new Date(dateStr).toLocaleDateString('zh-CN', {
     year: 'numeric',
@@ -121,7 +142,14 @@ onMounted(fetchProjects)
       <div>
         <h1 class="page-title">工作区</h1>
         <p class="page-subtitle">workspace management</p>
+          
       </div>
+      <div class="flex items-center gap-4 justify-center">
+          <div class="cursor-pointer hover:text-red-600  font-medium text-black-600 text-sm" @click="type = 'education'"><span :class="type === 'education' ? 'text-blue-600' : ''" >教育</span></div>
+          <div class="cursor-pointer hover:text-red-600  font-medium text-black-600 text-sm" @click="type = 'article'"><span :class="type === 'article' ? 'text-blue-600' : ''" >有声小说</span></div>   
+          <div class="cursor-pointer hover:text-red-600  font-medium text-black-600 text-sm" @click="type = 'coding'"><span :class="type === 'coding' ? 'text-blue-600' : ''" >系统开发</span></div>  
+          <div class="cursor-pointer hover:text-red-600  font-medium text-black-600 text-sm" @click="type = 'mcp'"><span :class="type === 'mcp' ? 'text-blue-600' : ''" >mcp</span></div> 
+        </div>
       <button @click="openCreateModal" class="btn btn-primary">
         <Plus class="w-4 h-4" />
         新建项目
@@ -132,7 +160,7 @@ onMounted(fetchProjects)
       <Loader2 class="w-8 h-8 animate-spin text-primary-500" />
     </div>
 
-    <div v-else-if="projects.length === 0" class="card p-12 text-center">
+    <div v-else-if="categoryProjects.length === 0" class="card p-12 text-center">
       <div class="w-16 h-16 mx-auto rounded-2xl bg-blue-50 border border-blue-100 flex items-center justify-center mb-4">
         <FileText class="w-8 h-8 text-blue-400" />
       </div>
@@ -145,7 +173,7 @@ onMounted(fetchProjects)
 
     <div v-else class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
       <div
-        v-for="project in projects"
+        v-for="project in categoryProjects"
         :key="project.id"
         @click="goToProject(project)"
         class="card p-5 cursor-pointer group"
@@ -157,7 +185,7 @@ onMounted(fetchProjects)
             </div>
             <div>
               <p class="text-xs text-surface-400 mb-0.5">用途</p>
-              <span :class="['px-2 py-0.5 rounded-full text-xs font-medium', project.purpose === 'article' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700']">
+              <span :class="['px-2 py-0.5 rounded-full text-xs font-medium', getPurposeColor(project.purpose)]">
                 {{ getPurposeLabel(project.purpose) }}
               </span>
               <p class="text-xs text-surface-400 mt-1">{{ formatDate(project.created_at) }}</p>
@@ -201,12 +229,14 @@ onMounted(fetchProjects)
             v-model="newProjectName"
             type="text"
             placeholder="输入项目名称"
-            class="w-full px-4 py-2 border border-surface-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+            class="w-full px-4 py-2 border border-surface-200 rounded-lg focus:outline-none focus:ring-2 
+            text-sm
+            focus:ring-primary-500 focus:border-transparent"
             @keydown.enter="handleCreateProject"
           />
         </div>
 
-        <div>
+        <!-- <div>
           <label class="block text-sm font-medium text-surface-700 mb-2">项目用途 *</label>
           <div class="flex gap-3">
             <button 
@@ -224,15 +254,17 @@ onMounted(fetchProjects)
               代码开发
             </button>
           </div>
-        </div>
+        </div> -->
 
         <div>
           <label class="block text-sm font-medium text-surface-700 mb-2">项目描述</label>
           <textarea 
             v-model="newProjectDescription"
-            placeholder="输入项目描述（可选）"
-            rows="3"
-            class="w-full px-4 py-2 border border-surface-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none"
+            placeholder="输入项目描述（项目用途、目标、内容等，最终结果描述）"
+            rows="10"
+            class="w-full px-4 py-2 border border-surface-200 rounded-lg focus:outline-none focus:ring-2 
+            text-sm
+            focus:ring-primary-500 focus:border-transparent resize-none"
           ></textarea>
         </div>
 

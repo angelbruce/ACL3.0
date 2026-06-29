@@ -224,6 +224,13 @@ impl NodeAgentMsg {
     }
 }
 
+pub struct NodeEdge{
+    pub from: i64,
+    pub to: i64,
+    pub to_desc: String,
+    pub desc: String,
+}
+
 pub struct NodeAgent {
     runtime_node_id: i64,
     runtime_id: i64,
@@ -233,6 +240,7 @@ pub struct NodeAgent {
     prompt: Option<String>,
     human: bool,
     repo: Arc<FlowRepository>,
+    edges: Vec<NodeEdge>,
 }
 
 impl NodeAgent {
@@ -254,6 +262,7 @@ impl NodeAgent {
             prompt,
             human: false,
             repo,
+            edges: Vec::new(),
         }
     }
 
@@ -269,7 +278,16 @@ impl NodeAgent {
         let agent = repo.get_agent_by_id(self.action_id).await?;
         let human_data = self.repo.get_flow_runtime_node_human(self.runtime_node_id).await?;
         self.human = human_data == 1;
+        
+        if !agent.defination.is_none() {
+             messages.push(shared::models::ChatMessage{
+                role: "system".to_string(),
+                content: agent.defination.clone(),
+                ..Default::default()
+            });
+        }
        
+
         if let Some(ref prompt) = self.prompt {
             messages.push(shared::models::ChatMessage {
                 role: "system".to_string(),
@@ -277,13 +295,23 @@ impl NodeAgent {
                 ..Default::default()
             });
         }
-        
-        messages.push(shared::models::ChatMessage{
-            role: "system".to_string(),
-            content: agent.defination.clone(),
-            ..Default::default()
-        });
 
+        //LLM决策支持
+        if !self.edges.is_empty() {
+            let strategy = "**决策支撑**:你需要做出行动以支持以下决策，每个决策都有一个名称和下一步支撑描述。\n".to_string();
+            let edge_paths = self.edges.iter()
+            .map(|e| format!("决策名称：{} -> 下一步支撑描述：{}。", e.to_desc, e.desc))
+            .collect::<Vec<String>>().join("\n");
+            let prompts = format!("{}{}\n必须从其中选择一项并输出，输出格式```next <决策名称>```", strategy, edge_paths);
+
+            messages.push(shared::models::ChatMessage {
+                role: "system".to_string(),
+                content: Some(prompts),
+                ..Default::default()
+            });
+        }
+
+    
         messages.push(shared::models::ChatMessage {
             role: "system".to_string(),
             content: Some("**任务约束**：如果已经完成所有任务请输出````__stop__````，如何需要人参与，请输出````__human__````".to_string()), 
@@ -297,7 +325,6 @@ impl NodeAgent {
         });
 
         loop {
-
             let mut recv_msg: Option<NodeAgentMsg> = None;
             if self.human {
                 //进入阻塞模式，等待人参与

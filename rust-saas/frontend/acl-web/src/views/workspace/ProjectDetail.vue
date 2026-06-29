@@ -979,13 +979,10 @@ const showSettings = () => {
         <div class="p-3">
           <div class="flex items-center justify-between mb-2">
             <span class="text-sm font-medium text-surface-600">文件列表</span>
-            <!-- <button @click="openNewFileModal" class="p-1 text-surface-400 hover:text-surface-600 hover:bg-surface-100 rounded transition-colors">
-              <Plus class="w-4 h-4" />
-            </button> -->
           </div>
           <div class="space-y-1">
             <div 
-              v-if="project && project?.purpose === 'article'"
+              v-if="project && (project?.purpose === 'article' || project?.purpose === 'education')"
               v-for="file in projectFiles" 
               :key="file.id"
               @click="selectFile(file)"
@@ -1004,7 +1001,7 @@ const showSettings = () => {
                 </button>
               </div>
               <div class="flex items-center gap-2">
-                <FileText class="w-4 h-4" v-if="project?.purpose !== 'article'" />
+                <FileText class="w-4 h-4" v-if="project?.purpose !== 'article' && project?.purpose !== 'education'" />
                 <span class="text-sm truncate">{{ file.name }}</span>
               </div>
               <button 
@@ -1015,7 +1012,7 @@ const showSettings = () => {
               </button>
             </div>
 
-            <el-tree :data="fileTree" v-if="project && project?.purpose === 'coding'" 
+            <el-tree :data="fileTree" v-if="project && (project?.purpose === 'coding' || project?.purpose === 'mcp')" 
                 check-strictly="true" 
                 highlight-current="true"
                 empty-text="暂无文件"
@@ -1153,7 +1150,7 @@ const showSettings = () => {
             </button>
 
             <button class="bg-surface-50 border px-2 py-2 border-surface-200 rounded-lg hover:bg-surface-100 transition-colors text-sm text-surface-600 flex items-center gap-2"
-             v-if="project && project?.purpose === 'coding'"
+             v-if="project && (project?.purpose === 'coding' || project?.purpose === 'mcp')"
              @click="debugCode"
              >
              <ComponentIcon class="w-4 h-4" /> <span>调试</span>

@@ -23,7 +23,18 @@ const getPurposeIcon = (purpose: ProjectPurpose) => {
 }
 
 const getPurposeLabel = (purpose: ProjectPurpose) => {
-  return purpose === 'article' ? '文章创作' : '代码开发'
+  switch(purpose) {
+    case 'article':
+      return '文章创作'
+    case 'coding':
+      return '代码开发'
+    case 'education':
+      return '教育'
+    case 'mcp':
+      return 'MCP项目'
+    default:
+      return '未知项目'
+  }
 }
 
 const getPurposeClass = (purpose: ProjectPurpose) => {
@@ -112,7 +123,7 @@ onMounted(async () => {
     <div class="max-w-6xl mx-auto px-4 py-8">
       <div class="flex items-center justify-between mb-8">
         <div>
-          <h1 class="text-2xl font-bold text-surface-800">我的项目</h1>
+          <h1 class="text-2xl font-bold text-surface-800">我的项目</h1>       
           <p class="text-surface-500 mt-1">管理您的工作区项目</p>
         </div>
         <button 

@@ -255,7 +255,7 @@ export interface ApiResponse<T> {
 }
 
 // Workspace/Project types
-export type ProjectPurpose = 'article' | 'coding'
+export type ProjectPurpose = 'article' | 'coding' | 'education' | 'mcp'
 
 export interface Project {
   id: number

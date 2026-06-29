@@ -2,10 +2,12 @@ use chrono::Utc;
 use diesel::pg::PgConnection;
 use diesel::prelude::*;
 use diesel::r2d2::{self, ConnectionManager};
-use shared::errors::{ServiceError, ServiceResult};
-use shared::models::{Flow, FlowRuntime, FlowRuntimeNode, NodeStatus, CreateFlowRequest, LlmModel};
-use shared::schema::{flows, flow_runtimes, flow_runtime_nodes, llm_models};
+use shared::errors::*;
+use shared::models::*;
+use shared::schema::*;
 use std::env;
+use crate::model::*;
+use crate::schema::*;
 
 pub struct FlowRepository {
     pool: r2d2::Pool<ConnectionManager<PgConnection>>,
@@ -258,6 +260,101 @@ impl FlowRepository {
         
         Ok(())
     }
+
+
+    pub async fn insert_flow_runtime_session(&self, session: &FlowRuntimeSession) -> ServiceResult<FlowRuntimeSession> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        
+        let new_session = diesel::insert_into(flow_runtime_sessions::table)
+            .values(session)
+            .returning(FlowRuntimeSession::as_select())
+            .get_result::<FlowRuntimeSession>(&mut conn)?;
+        
+        Ok(new_session)
+    }
+
+    pub async fn insert_flow_runtime_session_item(&self, item: &FlowRuntimeSessionItem) -> ServiceResult<FlowRuntimeSessionItem> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        
+        let new_item = diesel::insert_into(flow_runtime_session_items::table)
+            .values(item)
+            .returning(FlowRuntimeSessionItem::as_select())
+            .get_result::<FlowRuntimeSessionItem>(&mut conn)?;
+        
+        Ok(new_item)
+    }
+
+    pub async fn get_flow_runtime_session(&self, session_id: i64) -> ServiceResult<FlowRuntimeSession> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        
+        let session = flow_runtime_sessions::table
+            .filter(flow_runtime_sessions::id.eq(session_id))
+            .first::<FlowRuntimeSession>(&mut conn)?;
+        
+        Ok(session)
+    }
+
+    pub async fn get_flow_runtime_sessions_by_flow_runtime_id(&self, flow_runtime_id: i64)->ServiceResult<Vec<FlowRuntimeSession>> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        
+        let sessions = flow_runtime_sessions::table
+            .filter(flow_runtime_sessions::flow_runtime_id.eq(flow_runtime_id))
+            .load::<FlowRuntimeSession>(&mut conn)?;
+        
+        Ok(sessions)
+    }
+
+    pub async fn get_flow_runtime_session_items_by_flow_runtime_id(&self,flow_runtime_id:i64)->ServiceResult<Vec<FlowRuntimeSessionItem>> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        
+        let items = flow_runtime_session_items::table
+            .filter(flow_runtime_session_items::flow_runtime_id.eq(flow_runtime_id))
+            .load::<FlowRuntimeSessionItem>(&mut conn)?;
+        
+        Ok(items)
+    }
+
+    pub async fn get_flow_runtime_session_items_by_session_id(&self,flow_runtime_id: i64, session_id: i64) -> ServiceResult<Vec<FlowRuntimeSessionItem>> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        
+        let items = flow_runtime_session_items::table
+            .filter(flow_runtime_session_items::flow_runtime_id.eq(flow_runtime_id))
+            .filter(flow_runtime_session_items::flow_runtime_session_id.eq(session_id))
+            .load::<FlowRuntimeSessionItem>(&mut conn)?;
+        
+        Ok(items)
+    }
+
+    pub async fn delete_flow_runtime_session_by_session_id(&self, id:i64)->ServiceResult<()> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        
+        diesel::delete(flow_runtime_sessions::table
+            .filter(flow_runtime_sessions::id.eq(id)))
+            .execute(&mut conn)?;
+
+
+        diesel::delete(flow_runtime_session_items::table)
+        .filter(flow_runtime_session_items::flow_runtime_session_id.eq(id))
+        .execute(&mut conn)?;
+        
+        Ok(())
+    }
+
+
+    pub async fn delete_flow_runtime_session_by_flow_runtime_id(&self, flow_runtime_id: i64) -> ServiceResult<()> {
+        let mut conn = self.pool.get().map_err(|e| ServiceError::DatabaseError(e.to_string()))?;
+        
+        diesel::delete(flow_runtime_sessions::table
+            .filter(flow_runtime_sessions::flow_runtime_id.eq(flow_runtime_id)))
+            .execute(&mut conn)?;
+        
+        diesel::delete(flow_runtime_session_items::table
+            .filter(flow_runtime_session_items::flow_runtime_id.eq(flow_runtime_id)))
+            .execute(&mut conn)?;
+        
+        Ok(())
+    }
+
 }
 
 pub struct FlowRuntimeNodeCreate {

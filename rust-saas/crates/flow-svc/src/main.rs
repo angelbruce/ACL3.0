@@ -13,7 +13,7 @@ mod executor;
 mod llm_client;
 mod flow;
 mod agent_repository;
-mod emp_repository;
+mod model;
 mod schema;
 
 #[tokio::main]

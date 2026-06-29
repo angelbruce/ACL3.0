@@ -8,6 +8,8 @@ export interface NodeInfo {
     paths: string[];
     x?: number;
     y?: number;
+    w?: number;
+    h?: number;
 }
 export interface Edge {
     id: string;
@@ -34,7 +36,9 @@ export interface PathInfo {
 export const nodeTypes = [
     { type: 'start', label: '开始' },
     { type: 'agent', label: '动作' },
-    { type: 'terminate', label: '终止' },
+    { type: 'input', label: '输入' },
+    // { type: 'output', label: '输出' },
+    // { type: 'terminate', label: '终止' },
     { type: 'end', label: '结束' },
 ];
 

@@ -1759,7 +1759,9 @@ mxPoint.prototype.clone = function()
  */
 function mxRectangle(x, y, width, height)
 {
-	mxPoint.call(this, x, y);
+	try{
+		mxPoint.call(this, x, y);
+	}catch(e) {}
 
 	this.width = (width != null) ? width : 0;
 	this.height = (height != null) ? height : 0;
@@ -51734,19 +51736,22 @@ mxGraphView.prototype.getBoundingBox = function(state, recurse)
 			
 			for (var i = 0; i < childCount; i++)
 			{
-				var bounds = this.getBoundingBox(this.getState(model.getChildAt(state.cell, i)));
-				
-				if (bounds != null)
-				{
-					if (bbox == null)
+				try {
+					
+					var bounds = this.getBoundingBox(this.getState(model.getChildAt(state.cell, i)));
+					
+					if (bounds != null)
 					{
-						bbox = bounds;
+						if (bbox == null)
+						{
+							bbox = bounds;
+						}
+						else
+						{
+							bbox.add(bounds);
+						}
 					}
-					else
-					{
-						bbox.add(bounds);
-					}
-				}
+				} catch(e) {}
 			}
 		}
 	}
