@@ -93,7 +93,8 @@ const formatDate = (dateStr: string) => {
 
         <div class="min-h-[80px]">
           <p class="text-xs text-surface-400 mb-1">定义</p>
-          <p v-if="agent.defination" class="text-sm text-surface-600 line-clamp-3">{{ agent.defination }}</p>
+          <p v-if="agent.defination" class="text-sm text-surface-600 line-clamp-3"><el-tooltip placement="top"  :content="agent.defination">
+            {{ agent.defination }}</el-tooltip></p>
           <p v-else class="text-sm text-surface-300 italic">暂无定义</p>
         </div>
       </div>

@@ -3,7 +3,7 @@ use diesel::prelude::*;
 // use diesel::sql_types::*;
 use serde::{Serialize, Deserialize};
 // use uuid::Uuid;
-
+use std::collections::HashMap;
 
 
 #[derive(Debug, Serialize, Deserialize, Clone, Queryable, Selectable)]
@@ -635,7 +635,7 @@ pub struct PersonnelUpdate {
     pub phone: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug,Clone, Serialize, Deserialize)]
 pub struct MCPTool {
     pub name:String,
     pub description: String,
@@ -657,6 +657,31 @@ pub struct ChatMessage {
     pub name : Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls : Option<Vec<ToolCallInfo>>,
+    #[serde(skip_serializing)]
+    pub session: Option<UserSession>,
+}
+
+unsafe impl core::marker::Send for ChatMessage{}
+
+#[derive(Debug, Clone, Serialize, Deserialize,Default)]
+pub struct StreamResponse {
+    pub content: String,
+    pub reasoning_content: Option<String>,
+    pub tool_calls: Option<Vec<ToolCallInfo>>,
+    pub finish_reason: Option<String>,
+    pub done: bool,
+}
+
+impl StreamResponse {
+    pub fn done() -> Self {
+        Self {
+            content : "".to_string(),
+            reasoning_content: None,
+            tool_calls: None,
+            finish_reason: None,
+            done: true,
+        }
+    }
 }
 
 #[derive(Clone,Default,Debug, Serialize, Deserialize)]
@@ -676,6 +701,22 @@ pub struct ToolCallFunction {
     pub name: Option<String>,
     pub arguments: Option<String>,
 }
+
+#[derive(Debug, Serialize)]
+pub struct ChatCompletionRequest {
+    #[serde(skip_serializing)]
+    pub model: String,
+    pub messages: Vec<ChatMessage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<LlmTool>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stream: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
+}
+
 
 
 #[derive(Debug, Serialize, Deserialize, Clone, Queryable, Selectable)]
@@ -783,6 +824,7 @@ pub struct Vertex {
     pub value: String,
     // the paths which have to be finished if the node want to continued to move to the next node.
     pub paths:Vec<String>,
+    // start, agent, input, over
     pub r#type :String,
     //the agent id of the vertex-node, it's the id of the agent in the flow config.
     pub agent: Option<i64>,
@@ -880,7 +922,7 @@ pub struct MCPToolCallResult {
 
 
 
-#[derive(Debug, Serialize, Deserialize, Clone, Queryable, Selectable)]
+#[derive(Debug, Serialize, Deserialize, Clone, Queryable, Selectable, AsChangeset, Insertable)]
 #[diesel(table_name = crate::schema::mcp_servers)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct McpServer {
@@ -998,7 +1040,7 @@ pub struct AgentTool {
     pub server_id: Option<i64>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Insertable)]
+#[derive(Debug, Serialize, Deserialize, Clone, Insertable,Queryable,Selectable)]
 #[diesel(table_name = crate::schema::agent_tools)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewAgentTool {
@@ -1302,3 +1344,64 @@ pub struct FileAssignmentResult {
     pub confidence_score: f64,
     pub assignment_reason: String,
 }
+
+
+
+#[derive(Debug, Deserialize)]
+pub struct StreamChunk {
+    pub choices: Vec<StreamChoice>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct StreamChoice {
+    pub delta: StreamDelta,
+    pub finish_reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct StreamDelta {
+    pub role : Option<String>,
+    pub content: Option<String>,
+    pub tool_calls: Option<Vec<ToolCallInfo>>,
+    pub reasoning_content: Option<String>,
+}
+
+
+
+#[derive(Debug, Serialize, Deserialize,Clone,Default)]
+pub struct UserSession {
+    #[serde(rename = "UserId")]
+       pub user_id: i64,
+    #[serde(rename = "ProjectId")]
+       pub project_id: i64,
+       #[serde(rename="Config")]
+    pub flow_id: i64,
+       #[serde(rename="WorkspaceId")]
+    pub workspace_id: i64,
+}
+
+
+impl UserSession {
+    pub fn new(user_id: i64, project_id: i64, flow_id: i64,workspace_id:i64) -> Self {
+        Self {
+            user_id,
+            project_id,
+            flow_id,
+            workspace_id
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize,Clone)]
+pub struct Board {
+     store : HashMap<String,String>
+}
+
+
+impl Board {
+    
+    pub fn init() ->Self {
+        Self { store: HashMap::new()}
+    }
+}
+

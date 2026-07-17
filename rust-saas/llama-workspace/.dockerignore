@@ -1,0 +1,33 @@
+# Rust 构建产物 (最重要！)
+target/
+
+# Git 历史
+.git/
+.gitignore
+
+# IDE 和编辑器
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Docker 自身
+Dockerfile*
+docker-compose*
+.dockerignore
+
+# 文档和测试
+README*
+LICENSE
+docs/
+tests/
+
+# 模型文件 (如果有的话)
+*.gguf
+*.bin
+*.safetensors
+models/
+
+# OS 文件
+Thumbs.db
+.DS_Store

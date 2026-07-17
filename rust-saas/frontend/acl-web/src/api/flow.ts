@@ -26,4 +26,13 @@ export const flowService = {
 
   getFlowRuntimeByFlowId: (id: number) =>
     api.get<FlowRuntime | null>(flowApi, `/api/flows/flow/${id}/runtime`),
+
+  sendHumanInput: (flowId: number, nodeId: number, message: string) =>
+    api.post(flowApi, `/api/flows/${flowId}/nodes/${nodeId}/human-input`, { message }),
+
+  getFlowRuntimeSessions: (runtimeId: number) =>
+    api.get(flowApi, `/api/flow-runtimes/${runtimeId}/sessions`),
+
+  getFlowRuntimeSessionItems: (runtimeId: number, sessionId: number) =>
+    api.get(flowApi, `/api/flow-runtimes/${runtimeId}/sessions/${sessionId}/items`),
 }

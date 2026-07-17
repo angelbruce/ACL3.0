@@ -1145,7 +1145,9 @@ const showSettings = () => {
 
             <audio ref="audioRef" v-if="project && project?.purpose == 'article' && playing" controls></audio>
 
-            <button class="bg-surface-50 border px-2 py-2 border-surface-200 rounded-lg hover:bg-surface-100 transition-colors text-sm text-surface-600 flex items-center gap-2">
+            <button 
+            v-if="project?.purpose=='mcp'"
+            class="bg-surface-50 border px-2 py-2 border-surface-200 rounded-lg hover:bg-surface-100 transition-colors text-sm text-surface-600 flex items-center gap-2">
              <LucideFolderOutput class="w-4 h-4" /> <span>导出</span>
             </button>
 

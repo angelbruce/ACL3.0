@@ -1,0 +1,83 @@
+# 编译环境
+FROM nvidia/cuda:12.4.0-devel-ubuntu22.04 AS builder
+
+# 编译依赖
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    build-essential \
+    libclang-dev \      
+    cmake \
+    curl \
+    ca-certificates \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# 安装 Rust（非交互式）
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+# 配置环境变量
+ENV LLAMA_CPP_NO_VENDOR=0 \
+    PATH="/root/.cargo/bin:${PATH}"
+
+# 配置 Cargo 使用 sparse 协议加速
+RUN mkdir -p /root/.cargo && \
+    echo '[source.crates-io]' > /root/.cargo/config.toml && \
+    echo 'registry = "sparse+https://index.crates.io/"' >> /root/.cargo/config.toml
+
+
+RUN mkdir -p patches/shimmytok-0.7.1 &&  mkdir -p /app/patches/llama-cpp-4-0.4.0
+# 工作區 
+COPY ./llama-workspace/Cargo.toml /app/llama-workspace/
+
+# 共享
+COPY ./crates/shared/Cargo.toml /app/crates/shared/
+COPY ./crates/extmacros/Cargo.toml /app/crates/extmacros/
+
+# 工作區共享
+COPY ./llama-workspace/crates/llama_shared/Cargo.toml /app/llama-workspace/crates/llama_shared/
+
+# 補丁
+COPY ./llama-workspace/patches/llama-cpp-4-0.4.0/ /app/llama-workspace/patches/llama-cpp-4-0.4.0/ 
+
+# 應用
+COPY ./llama-workspace/crates/llm-svc/Cargo.toml /app/llama-workspace/crates/llm-svc/
+COPY ./llama-workspace/crates/flow-svc/Cargo.toml /app/llama-workspace/crates/flow-svc/
+COPY ./llama-workspace/crates/workspace-svc/Cargo.toml /app/llama-workspace/crates/workspace-svc/
+COPY ./llama-workspace/crates/vec-svc/Cargo.toml /app/llama-workspace/crates/vec-svc/
+
+RUN ls -lah /app
+
+# 创建一个空的 main.rs 来触发依赖下载和编译
+RUN mkdir -p \
+    /app/crates/shared/src \
+    /app/crates/extmacros/src  \
+    /app/llama-workspacecrates/crates/llama_shared/src \
+    /app/llama-workspacecrates/crates/llm-svc/src \
+    /app/llama-workspacecrates/crates/flow-svc/src \
+    /app/llama-workspacecrates/crates/workspace-svc/src \
+    /app/llama-workspacecrates/crates/vec-svc/src && \
+    echo "fn main() {}" > /app/crates/shared/src/lib.rs && \
+    echo "fn main() {}" > /app/crates/extmacros/src/lib.rs && \
+    echo "fn main() {}" > /app/llama-workspace/crates/llama_shared/src/lib.rs && \
+    echo "fn main() {}" > /app/llama-workspace/crates/llm-svc/src/main.rs && \
+    echo "fn main() {}" > /app/llama-workspace/crates/flow-svc/src/main.rs && \
+    echo "fn main() {}" > /app/llama-workspace/crates/workspace-svc/src/main.rs && \
+    echo "fn main() {}" > /app/llama-workspace/crates/vec-svc/src/main.rs
+
+
+
+# 直接軟連接到 CUDA Toolkit 內建的官方 stub 庫
+# RUN ln -s /usr/local/cuda/lib64/stubs/libcuda.so /usr/lib/x86_64-linux-gnu/libcuda.so.1 && ldconfig
+# RUN ls /usr/local/cuda/lib64/stubs/
+
+ENV LLAMA_BUILD_TOOLS=OFF 
+
+RUN rm -rf /app/llama-workspace/target/llama-cmake-cache/ || true
+# 在此處編譯
+WORKDIR /app/llama-workspace/
+RUN cargo build --release 
+
+# 清理临时文件，但保留依赖缓存
+RUN rm -rf crates/*/src 

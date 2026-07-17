@@ -93,46 +93,10 @@ services:
       timeout: 5s
       retries: 5
 
-  agent-svc:
-    build:
-      context: .
-      dockerfile: ./crates/agent-svc/Dockerfile
-    container_name: acl-agent-svc
-    ports:
-      - "8081:8080"
-    environment:
-      - PORT=8080
-      - DATABASE_URL=postgres://admin:password@postgres:5432/acl_db
-      - REDIS_URL=redis://redis:6379/0
-      - JWT_SECRET=your-256-bit-secret-key-here-change-in-production
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-
-  flow-svc:
-    build:
-      context: .
-      dockerfile: ./crates/flow-svc/Dockerfile
-    container_name: acl-flow-svc
-    ports:
-      - "8082:8080"
-    environment:
-      - PORT=8080
-      - DATABASE_URL=postgres://admin:password@postgres:5432/acl_db
-      - REDIS_URL=redis://redis:6379/0
-      - JWT_SECRET=your-256-bit-secret-key-here-change-in-production
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-
   session-svc:
     build:
       context: .
-      dockerfile: ./crates/session-svc/Dockerfile
+      dockerfile: ./base-workspace/crates/session-svc/Dockerfile
     container_name: acl-session-svc
     ports:
       - "8083:8080"
@@ -147,28 +111,10 @@ services:
       redis:
         condition: service_healthy
 
-  llm-svc:
-    build:
-      context: .
-      dockerfile: ./crates/llm-svc/Dockerfile
-    container_name: acl-llm-svc
-    ports:
-      - "8084:8080"
-    environment:
-      - PORT=8080
-      - DATABASE_URL=postgres://admin:password@postgres:5432/acl_db
-      - REDIS_URL=redis://redis:6379/0
-      - MCP_BASE_URL=http://mcp-svc:8080
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-
   mcp-svc:
     build:
       context: .
-      dockerfile: ./crates/mcp-svc/Dockerfile
+      dockerfile: ./base-workspace/crates/mcp-svc/Dockerfile
     container_name: acl-mcp-svc
     ports:
       - "8085:8080"
@@ -185,7 +131,7 @@ services:
   auth-svc:
     build:
       context: .
-      dockerfile: ./crates/auth-svc/Dockerfile
+      dockerfile: ./base-workspace/crates/auth-svc/Dockerfile
     container_name: acl-auth-svc
     ports:
       - "8080:8080"
@@ -203,7 +149,7 @@ services:
   admin-svc:
     build:
       context: .
-      dockerfile: ./crates/admin-svc/Dockerfile
+      dockerfile: ./base-workspace/crates/admin-svc/Dockerfile
     container_name: acl-admin-svc
     ports:
       - "8086:8080"
@@ -217,10 +163,103 @@ services:
       redis:
         condition: service_healthy
 
+
+  # # 暂时不用，尚未支持streamable http tools fetch.
+  # mcp-provider-svc:
+  #   build:
+  #     context: .
+  #     dockerfile: ./base-workspace/crates/mcp-provider-svc/Dockerfile
+  #   container_name: acl-mcp-provider-svc
+  #   ports:
+  #     - "8088:8088"
+  #   environment:
+  #     - PORT=8088
+  #     - DATABASE_URL=postgres://admin:password@postgres:5432/acl_db
+  #     - REDIS_URL=redis://redis:6379/0
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+
+
+  agent-svc:
+    build:
+      context: .
+      dockerfile: ./base-workspace/crates/agent-svc/Dockerfile
+    container_name: acl-agent-svc
+    ports:
+      - "8081:8080"
+    environment:
+      - PORT=8080
+      - DATABASE_URL=postgres://admin:password@postgres:5432/acl_db
+      - REDIS_URL=redis://redis:6379/0
+      - JWT_SECRET=your-256-bit-secret-key-here-change-in-production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  llm-svc:
+    build:
+      context: .
+      dockerfile: ./llama-workspace/crates/llm-svc/Dockerfile
+    container_name: acl-llm-svc
+    ports:
+      - "8084:8080"
+    environment:
+      - PORT=8080
+      - DATABASE_URL=postgres://admin:password@postgres:5432/acl_db
+      - REDIS_URL=redis://redis:6379/0
+      - MCP_BASE_URL=http://mcp-svc:8080
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+
+
+
+  flow-svc:
+    build:
+      context: .
+      dockerfile: ./llama-workspace/crates/flow-svc/Dockerfile
+    container_name: acl-flow-svc
+    ports:
+      - "8082:8080"
+    environment:
+      - PORT=8080
+      - DATABASE_URL=postgres://admin:password@postgres:5432/acl_db
+      - REDIS_URL=redis://redis:6379/0
+      - JWT_SECRET=your-256-bit-secret-key-here-change-in-production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+
   workspace-svc:
     build:
       context: .
-      dockerfile: ./crates/workspace-svc/Dockerfile
+      dockerfile: ./llama-workspace/crates/workspace-svc/Dockerfile
     container_name: acl-workspace-svc
     ports:
       - "8087:8080"
@@ -241,29 +280,11 @@ services:
       redis:
         condition: service_healthy
 
-  # 暂时不用，尚未支持streamable http tools fetch.
-  # mcp-provider-svc:
-  #   build:
-  #     context: .
-  #     dockerfile: ./crates/mcp-provider-svc/Dockerfile
-  #   container_name: acl-mcp-provider-svc
-  #   ports:
-  #     - "8088:8088"
-  #   environment:
-  #     - PORT=8088
-  #     - DATABASE_URL=postgres://admin:password@postgres:5432/acl_db
-  #     - REDIS_URL=redis://redis:6379/0
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #     redis:
-  #       condition: service_healthy
-
   # Vector Service
   vec-svc:
     build:
       context: .
-      dockerfile: ./crates/vec-svc/Dockerfile
+      dockerfile: ./llama-workspace/crates/vec-svc/Dockerfile
     container_name: acl-vec-svc
     ports:
       - "8089:8080"
@@ -292,6 +313,9 @@ services:
         condition: service_started
     restart: unless-stopped
 
+
+
+
 # volume list
 volumes:
   milvus_data:
@@ -308,3 +332,8 @@ x-build-args:
     context: .
     dockerfile: Dockerfile.base
     image: rust-base:latest
+
+  llama-rust-base:
+    context: .
+    dockerfile: Dockerfile.llama.base
+    image: llama-rust-base:latest

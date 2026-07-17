@@ -1,0 +1,52 @@
+# Rust 基础构建镜像 - 包含工具链和依赖缓存
+FROM rust:1.89-slim as rust-base
+
+WORKDIR /app
+
+# 配置使用 Rust 官方 sparse index（加速依赖下载）
+RUN echo '[source.crates-io]' > /usr/local/cargo/config.toml && \
+    echo 'registry = "sparse+https://index.crates.io/"' >> /usr/local/cargo/config.toml
+
+# 使用阿里云镜像源
+# RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources && \
+#     apt-get update && apt-get install -y pkg-config libssl-dev ca-certificates perl libfindbin-libs-perl make gcc && rm -rf /var/lib/apt/lists/*
+
+RUN  apt-get update && apt-get install -y pkg-config libssl-dev ca-certificates perl libfindbin-libs-perl make gcc && rm -rf /var/lib/apt/lists/*
+
+# 复制 Cargo.toml 并构建依赖缓存层
+COPY ./base-workspace/Cargo.toml /app/base-workspace/
+COPY ./crates/shared/Cargo.toml /app/crates/shared/
+COPY ./crates/extmacros/Cargo.toml /app/crates/extmacros/
+COPY ./base-workspace/crates/mcp-svc/Cargo.toml /app/base-workspace/crates/mcp-svc/
+COPY ./base-workspace/crates/mcp-provider-svc/Cargo.toml /app/base-workspace/crates/mcp-provider-svc/
+COPY ./base-workspace/crates/session-svc/Cargo.toml /app/base-workspace/crates/session-svc/
+COPY ./base-workspace/crates/auth-svc/Cargo.toml /app/base-workspace/crates/auth-svc/
+COPY ./base-workspace/crates/admin-svc/Cargo.toml /app/base-workspace/crates/admin-svc/
+COPY ./base-workspace/crates/agent-svc/Cargo.toml /app/base-workspace/crates/agent-svc/
+
+# 创建一个空的 main.rs 来触发依赖下载和编译
+RUN mkdir -p \
+    /app/crates/shared/src \
+    /app/crates/extmacros/src \
+    /app/base-workspace/crates/mcp-provider-svc/src \
+    /app/base-workspace/crates/mcp-svc/src \
+    /app/base-workspace/crates/agent-svc/src \ 
+    /app/base-workspace/crates/session-svc/src \ 
+    /app/base-workspace/crates/auth-svc/src \
+    /app/base-workspace/crates/admin-svc/src  && \
+    echo "fn main() {}" > /app/crates/shared/src/lib.rs && \
+    echo "fn main() {}" > /app/crates/extmacros/src/lib.rs && \
+    echo "fn main() {}" > /app/base-workspace/crates/mcp-provider-svc/src/main.rs && \
+    echo "fn main() {}" > /app/base-workspace/crates/mcp-svc/src/main.rs && \
+    echo "fn main() {}" > /app/base-workspace/crates/session-svc/src/main.rs && \
+    echo "fn main() {}" > /app/base-workspace/crates/auth-svc/src/main.rs && \
+    echo "fn main() {}" > /app/base-workspace/crates/admin-svc/src/main.rs && \
+    echo "fn main() {}" > /app/base-workspace/crates/agent-svc/src/main.rs 
+
+
+WORKDIR /app/base-workspace
+# 构建依赖（这会缓存所有 crates.io 依赖）
+RUN cargo build --release --all
+
+# 清理临时文件，但保留依赖缓存
+RUN rm -rf crates/*/src 

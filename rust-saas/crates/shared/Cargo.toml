@@ -4,18 +4,30 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+log = "0.4" 
+# 一个实际执行日志输出的实现者
+env_logger = "0.10" 
+encoding_rs = "0.8.35"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 thiserror = "1"
-diesel.workspace = true
-pq-sys.workspace = true
+diesel = { version = "2", features = ["postgres", "r2d2", "chrono", "serde_json"] }
+pq-sys = { version = "0.6", features = ["bundled"] }
 openssl-sys = { version = "0.9.116", features = ["vendored"] }
+once_cell = "1.19"
+dotenv = "0.15"
 jsonwebtoken = "9"
 axum = "0.7"
 http = "1"
 async-trait = "0.1"
+futures = "0.3"
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+async-stream = "0.3" 
+futures-util = "0.3.32"
+futures-core = "0.3.32"
 
 [lib]
 name = "shared"

@@ -1,0 +1,58 @@
+[workspace]
+members = [
+    "crates/llama_shared",
+    "crates/llm-svc",
+    "crates/workspace-svc",
+    "crates/flow-svc",
+]
+#  "crates/flow-svc",
+#    "crates/workspace-svc",
+#    "crates/vec-svc",
+#
+
+
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+
+[workspace.dependencies]
+axum = { version = "0.7", features = ["multipart"] }
+pq-sys = { version = "0.6", features = ["bundled"] }
+axum-extra = { version = "0.4", features = ["headers"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+diesel = { version = "2", features = ["postgres", "r2d2", "chrono", "serde_json"] }
+dotenv = "0.15"
+config = "0.13"
+jwt-simple = "0.12"
+bcrypt = "0.15"
+redis = "0.23"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+thiserror = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1"
+futures = "0.3"
+bytes = "1"
+http = "1"
+hyper = "1"
+base64 = "0.22"
+#futures-util = { version = "0.3.0" }
+tokio-stream = { version="0.1.18",features=["full"] }
+rmcp = { version = "1.6.0" ,features=["server","schemars","macros","server-side-http","transport-streamable-http-server-session","transport-streamable-http-server","transport-async-rw","transport-worker"]}
+serde_yaml = "0.9"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+async-stream = "0.3" 
+futures-util = "0.3.32"
+futures-core = "0.3.32"
+
+llama-cpp-4 = { version="=0.4.0", features = ["cuda"]}
+llama-cpp-sys-4 = { version="=0.4.0", features = ["cuda"]}
+
+[patch.crates-io]
+# shimmytok = { path = "patches/shimmytok-0.7.1" }
+llama-cpp-4 = { path = "patches/llama-cpp-4-0.4.0"}

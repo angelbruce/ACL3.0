@@ -1,0 +1,13 @@
+# Rust 基础运行时镜像 - 包含 CUDA 运行时
+FROM nvidia/cuda:12.4.0-runtime-ubuntu22.04
+
+WORKDIR /app
+
+# 安装运行时依赖
+RUN apt-get update && apt-get install -y ca-certificates libssl-dev && rm -rf /var/lib/apt/lists/*
+
+# 设置环境变量
+ENV RUST_LOG=info
+
+# 暴露默认端口
+EXPOSE 8080

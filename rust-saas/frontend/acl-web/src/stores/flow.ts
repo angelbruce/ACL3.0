@@ -176,6 +176,45 @@ export const useFlowStore = defineStore('flow', () => {
     }
   }
 
+  const sendHumanInput = async (flowId: number, nodeId: number, message: string) => {
+    loading.value = true
+    error.value = null
+    try {
+      await flowService.sendHumanInput(flowId, nodeId, message)
+    } catch (err: unknown) {
+      error.value = err instanceof Error ? err.message : 'Failed to send human input'
+      throw err
+    } finally {
+      loading.value = false
+    }
+  }
+
+  const getFlowRuntimeSessions = async (runtimeId: number) => {
+    loading.value = true
+    error.value = null
+    try {
+      return await flowService.getFlowRuntimeSessions(runtimeId)
+    } catch (err: unknown) {
+      error.value = err instanceof Error ? err.message : 'Failed to get sessions'
+      throw err
+    } finally {
+      loading.value = false
+    }
+  }
+
+  const getFlowRuntimeSessionItems = async (runtimeId: number, sessionId: number) => {
+    loading.value = true
+    error.value = null
+    try {
+      return await flowService.getFlowRuntimeSessionItems(runtimeId, sessionId)
+    } catch (err: unknown) {
+      error.value = err instanceof Error ? err.message : 'Failed to get session items'
+      throw err
+    } finally {
+      loading.value = false
+    }
+  }
+
   return {
     flows,
     currentFlow,
@@ -193,5 +232,8 @@ export const useFlowStore = defineStore('flow', () => {
     deleteFlow,
     startFlow,
     stopFlow,
+    sendHumanInput,
+    getFlowRuntimeSessions,
+    getFlowRuntimeSessionItems,
   }
 })

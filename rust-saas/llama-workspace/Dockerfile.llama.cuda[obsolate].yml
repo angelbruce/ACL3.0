@@ -1,0 +1,80 @@
+# 编译环境
+FROM nvidia/cuda:12.4.0-devel-ubuntu22.04 AS builder
+# 编译依赖
+RUN  apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    git \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# 为libcuda创建stub软链接
+# 编译的时候不需要阵驱动，只需要stub骗过就可以，运行时docekr挂载真驱动
+RUN set -eux; \
+    STUB_DIR="/usr/local/cuda/lib64/stubs"; \
+    LIB_DIR="/usr/local/cuda/lib64"; \
+    if [ -f "$STUB_DIR/libcuda.so" ]; then \
+        ln -sf "$STUB_DIR/libcuda.so" "$LIB_DIR/libcuda.so"; \
+        ln -sf "$STUB_DIR/libcuda.so" "$LIB_DIR/libcuda.so.1"; \
+        echo "Stub links created in $LIB_DIR"; \
+    else \
+        echo "ERROR: Stub files not found in $STUB_DIR"; \
+        ls -la "$STUB_DIR"; \
+        exit 1; \
+    fi
+
+WORKDIR /src
+# 自身递归复制，保留文件夹名称
+COPY llama.cpp /src/llama.cpp
+
+ARG INSTALL_PREFIX=/opt/llama
+RUN cd /src/llama.cpp && \
+cmake -B build  \
+-DBUILD_SHARED_LIBS=OFF \
+-DGGML_CUDA=ON  \
+-DCMAKE_BUILD_TYPE=Release  \
+-DCMAKE_INSTALL_PREFIX=/opt/llama  \
+-DLLAMA_STATIC=ON  && \
+cmake --build build --config Release -j$(nproc) 
+# cmake --build build --config Release -j$(nproc) && \
+# mkdir -p ${INSTALL_PREFIX}/lib ${INSTALL_PREFIX}/include && \
+# chmod 755 ${INSTALL_PREFIX}/lib && \
+# cmake --install build
+
+# RUN echo "----------------------------------------------------";
+# RUN echo " build llama.cpp of cuda version complete, ls -l /bin: "
+# RUN ls -l /src/llama.cpp/build/bin
+# RUN ls -l /opt/llama/include/llama.h &&  ls -l /opt/llama/lib/libllama.a
+# RUN echo "----------------------------------------------------";
+
+
+
+
+#阶段2 运行环境
+FROM nvidia/cuda:12.4.0-runtime-ubuntu22.04
+# 源代码 编译环境
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN  apt-get update && apt-get install -y pkg-config libssl-dev ca-certificates perl libfindbin-libs-perl make gcc && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /usr/local/cuda/lib64/libcusparse.so.12 /usr/local/cuda/lib64/
+COPY --from=builder /usr/local/cuda/lib64/libcublas.so.12 /usr/local/cuda/lib64/
+COPY --from=builder /src /app
+# COPY --from=builder /src/llama.cpp/build/bin /app/llama-bin/
+# COPY --from=builder /opt/llama /opt/llama
+# 复制 CUDA 运行时依赖（最小化集合）
+
+# # COPY --from=builder /usr/local/cuda/lib64/libcudnn.so.8 /usr/local/cuda/lib64/
+# RUN ln -sf /usr/local/cuda/lib64/libcusparse.so.12 /usr/local/cuda/lib64/libcusparse.so && \
+#     ln -sf /usr/local/cuda/lib64/libcublas.so.12 /usr/local/cuda/lib64/libcublas.so && \
+#     ldconfig
+# ENV LD_LIBRARY_PATH=/opt/llama/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+# RUN ldd /opt/llama/lib/libllama.a | grep -E 'cusparse|cublas|cudnn' || \    (echo "ERROR: Missing CUDA dependencies!" && false)
+
+WORKDIR /app
+RUN mkdir -p /models
+ENV PATH="/app/llama-bin:${PATH}"
+
+CMD ["/bin/bash"]

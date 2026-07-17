@@ -1,0 +1,65 @@
+{
+  "id": "agent-1783298258775-hkvvc",
+  "type": "agent",
+  "title": "Agent: Analyze this project structure and explain what it...",
+  "description": "Analyze this project structure and explain what it does",
+  "status": "success",
+  "progress": 100,
+  "createdAt": 1783298258775,
+  "updatedAt": 1783298273468,
+  "steps": [
+    {
+      "id": "1783298258777-7fqn4",
+      "description": "Agent session setup",
+      "action": "agent-setup",
+      "status": "success",
+      "requiresApproval": false,
+      "approved": false,
+      "metadata": {},
+      "completedAt": 1783298258785
+    },
+    {
+      "id": "1783298258786-ytnmr",
+      "description": "Iteration 1: reasoning",
+      "action": "llm-reasoning",
+      "status": "success",
+      "requiresApproval": false,
+      "approved": false,
+      "metadata": {},
+      "startedAt": 1783298258795,
+      "completedAt": 1783298269478,
+      "result": ""
+    },
+    {
+      "id": "1783298269479-p8r0b",
+      "description": "Tool: list_files",
+      "action": "tool-list_files",
+      "status": "success",
+      "requiresApproval": false,
+      "approved": false,
+      "metadata": {},
+      "startedAt": 1783298269479,
+      "completedAt": 1783298272053,
+      "result": "[DIR] .ant/\n[DIR] .ant/knowledge/\n[FILE] .ant/knowledge/knowledge.json\n[DIR] .ant/tasks/\n[FILE] .ant/tasks/agent-1783232432105-if9pq.json\n[FILE] .ant/tasks/agent-1783234480679-x9nr2.json\n[FILE] .ant/tasks/agent-1783235006160-vrmur.json\n[FILE] .ant/tasks/agent-1783235347230-ctaaj.json\n[FILE] .ant/tasks/agent-1783235729415-10gxr.json\n[FILE] .ant/tasks/agent-1783235856108-32vse.json\n[FILE] .ant/tasks/agent-1783236566030-gg8qz.json\n[FILE] .ant/tasks/agent-1783236650446-sw39n.json\n[FILE] .ant/tasks/a"
+    },
+    {
+      "id": "1783298272097-f0r3v",
+      "description": "Iteration 2: reasoning",
+      "action": "llm-reasoning",
+      "status": "success",
+      "requiresApproval": false,
+      "approved": false,
+      "metadata": {},
+      "startedAt": 1783298272097,
+      "completedAt": 1783298273467,
+      "result": ""
+    }
+  ],
+  "metadata": {
+    "mode": "agent",
+    "contextRefs": [],
+    "maxIterations": 25
+  },
+  "startedAt": 1783298258776,
+  "completedAt": 1783298273468
+}

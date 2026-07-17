@@ -87,14 +87,28 @@ const formatDate = (dateStr: string) => new Date(dateStr).toLocaleDateString('zh
             </div>
             <div class="min-w-0 flex-1">
               <h3 class="font-semibold text-base text-surface-800 truncate w-full max-w-[180px]" :title="model.name">{{ model.name }}</h3>
-              <p class="text-xs text-surface-400 mt-0.5">{{ formatDate(model.created_at) }}</p>
+              <!-- <p class="text-xs text-surface-400 mt-0.5">{{ formatDate(model.created_at) }}</p> -->
             </div>
           </div>
         </div>
 
-        <div class="mb-3">
-          <p class="text-xs text-surface-400 mb-1">API URL</p>
+        <div class="mb-3" v-if="model.access_url && model.access_url.length > 0">
+          <p class="text-xs text-surface-400 mb-1">模型位置</p>
           <p class="text-xs text-surface-600 truncate mb-2">{{ model.access_url }}</p>
+          <p class="text-xs text-surface-400 mb-1">API Key</p>
+          <div class="flex items-center gap-2 p-2 bg-surface-50 rounded-lg">
+            <code class="text-xs font-mono text-surface-600 flex-1 truncate">{{ showApiKey === model.id ? model.api_key : maskApiKey(model.api_key) }}</code>
+            <button @click.stop="toggleApiKey(model.id)" class="p-1 text-surface-400 hover:text-surface-700 rounded hover:bg-surface-100 transition-colors">
+              <EyeOff v-if="showApiKey === model.id" class="w-3.5 h-3.5" />
+              <Eye v-else class="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+
+
+         <div class="mb-3" v-if="!model.access_url || model.access_url.length === 0">
+          <p class="text-xs text-surface-400 mb-1">模型位置</p>
+          <p class="text-xs text-surface-600 truncate mb-2">本地模型</p>
           <p class="text-xs text-surface-400 mb-1">API Key</p>
           <div class="flex items-center gap-2 p-2 bg-surface-50 rounded-lg">
             <code class="text-xs font-mono text-surface-600 flex-1 truncate">{{ showApiKey === model.id ? model.api_key : maskApiKey(model.api_key) }}</code>
